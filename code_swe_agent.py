@@ -74,13 +74,15 @@ class CodeSWEAgent:
     def setup_repository(self, instance: Dict) -> Optional[str]:
         """Set up a repository for testing.
 
-        Layout: <work_root>/<instance_id>/<timestamp>/repo
+        Layout: <work_root>/<backend>/<instance_id>/<timestamp>/repo
 
         work_root defaults to <repo_root>/work but can be overridden by
-        SWE_BENCH_WORK_DIR. The intermediate timestamp directory means
-        repeated runs of the same instance never collide and outputs
-        accumulate one-per-run for inspection. The orchestrator no longer
-        wipes the workspace at the end — clean ./work/ manually if needed.
+        SWE_BENCH_WORK_DIR. The backend prefix means `claude` and
+        `claude-appmap` runs over the same instance live in different
+        trees and are immediately distinguishable. The timestamp dir
+        means repeated runs of the same configuration never collide.
+        The orchestrator no longer wipes the workspace at the end —
+        clean ./work/ manually if needed.
         """
         instance_id = instance["instance_id"]
         repo_name = instance["repo"]
@@ -89,7 +91,7 @@ class CodeSWEAgent:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         work_root = Path(os.environ.get("SWE_BENCH_WORK_DIR",
                                         str(self.base_dir / "work")))
-        run_dir = work_root / instance_id / timestamp
+        run_dir = work_root / self.backend / instance_id / timestamp
         temp_dir = run_dir / "repo"
         run_dir.mkdir(parents=True, exist_ok=True)
 

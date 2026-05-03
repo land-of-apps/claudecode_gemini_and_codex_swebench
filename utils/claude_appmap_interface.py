@@ -475,6 +475,7 @@ class ClaudeAppMapInterface:
             except Exception as e:
                 print(f"  warning: session symlink failed: {e}", flush=True)
             try:
+                last_usage_flush = 0.0
                 with src.open("r", errors="ignore") as f, console.open("a") as out:
                     out.write(f"# session_id={session_id}\n# source={src}\n")
                     out.flush()
@@ -491,6 +492,15 @@ class ClaudeAppMapInterface:
                                     out.flush()
                         else:
                             time.sleep(0.5)
+                        # Flush an in-progress usage snapshot every ~5s so
+                        # `cat <run_dir>/usage.json` always shows current cost.
+                        now = time.time()
+                        if now - last_usage_flush >= 5.0:
+                            last_usage_flush = now
+                            try:
+                                self._flush_live_usage(src, run_dir)
+                            except Exception:
+                                pass
             except Exception as e:
                 print(f"  warning: live log writer stopped: {e}", flush=True)
 
@@ -595,14 +605,17 @@ class ClaudeAppMapInterface:
     def _resolve_run_dir(self, clone: Path, instance_id: str) -> Path:
         """Return the per-run directory that holds outputs for this run.
 
-        When the orchestrator has placed the clone at ./work/<id>/<ts>/repo,
-        return ./work/<id>/<ts>. Otherwise fall back to a fresh
-        <repo_root>/appmap_archives/<id>_<ts>/ so smoke runs (whose clones
-        live elsewhere) still get a stable archive location."""
-        work_dir = clone.parent  # ./work/<id>/<ts>/
-        if work_dir.name and work_dir.parent.name == instance_id and \
-           work_dir.parent.parent.name == "work":
-            return work_dir
+        Recognized layouts:
+          ./work/<backend>/<id>/<ts>/repo   — current orchestrator
+          ./work/<id>/<ts>/repo             — older orchestrator (back-compat)
+
+        Walks up from `clone` looking for a parent named "work". Falls back
+        to <repo_root>/appmap_archives/<id>_<ts>/ for smoke runs whose
+        clones live elsewhere."""
+        run_dir = clone.parent
+        for ancestor in run_dir.parents:
+            if ancestor.name == "work":
+                return run_dir
         ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         fallback = ARCHIVES_DIR / f"{instance_id}_{ts}"
@@ -644,6 +657,13 @@ class ClaudeAppMapInterface:
         if copied:
             print(f"  archived {len(copied)} session log(s) → {target_root}", flush=True)
 
+    def _flush_live_usage(self, src: Path, run_dir: Path) -> None:
+        """Write a usage.json snapshot from the in-flight session.jsonl.
+        Mirrors _compute_and_save_usage but reads a single live source file."""
+        per_model, first_ts, last_ts = self._aggregate_usage([src])
+        self._write_usage_json(per_model, first_ts, last_ts, run_dir,
+                               instance_id=run_dir.parent.name, partial=True)
+
     def _compute_and_save_usage(self, clone: Path, instance_id: str) -> None:
         """Aggregate per-message `usage` blocks from the archived session logs
         and write <run_dir>/usage.json with token totals + estimated $ cost.
@@ -655,14 +675,23 @@ class ClaudeAppMapInterface:
         sessions_dir = run_dir / "sessions"
         if not sessions_dir.is_dir():
             return
+        per_model, first_ts, last_ts = self._aggregate_usage(
+            sorted(sessions_dir.glob("*.jsonl"))
+        )
+        self._write_usage_json(per_model, first_ts, last_ts, run_dir,
+                               instance_id=instance_id, partial=False)
 
-        pricing = self._load_pricing()
+    @staticmethod
+    def _aggregate_usage(jsonls: List[Path]):
         per_model: Dict[str, Dict[str, int]] = {}
         first_ts: Optional[str] = None
         last_ts: Optional[str] = None
-
-        for jsonl in sorted(sessions_dir.glob("*.jsonl")):
-            with jsonl.open(errors="ignore") as f:
+        for jsonl in jsonls:
+            try:
+                fh = jsonl.open(errors="ignore")
+            except Exception:
+                continue
+            with fh as f:
                 for line in f:
                     try:
                         d = json.loads(line)
@@ -694,6 +723,11 @@ class ClaudeAppMapInterface:
                         v = usage.get(k, 0)
                         if isinstance(v, int):
                             bucket[k] += v
+        return per_model, first_ts, last_ts
+
+    def _write_usage_json(self, per_model, first_ts, last_ts, run_dir,
+                          instance_id, partial):
+        pricing = self._load_pricing()
 
         models_out: Dict[str, Dict[str, object]] = {}
         totals = {"input_tokens": 0, "cache_read_input_tokens": 0,
@@ -719,6 +753,7 @@ class ClaudeAppMapInterface:
 
         out = {
             "instance_id": instance_id,
+            "partial": partial,
             "first_timestamp": first_ts,
             "last_timestamp": last_ts,
             "wall_seconds": wall_seconds,
@@ -728,13 +763,15 @@ class ClaudeAppMapInterface:
                                else "builtin: see _PRICING_PER_MTOK"),
         }
         (run_dir / "usage.json").write_text(json.dumps(out, indent=2))
-        print(
-            f"  usage: {totals['input_tokens']:,} in, "
-            f"{totals['output_tokens']:,} out, "
-            f"{totals['cache_read_input_tokens']:,} cache-read; "
-            f"~${totals['estimated_cost_usd']:.4f}",
-            flush=True,
-        )
+        if not partial:
+            # Only print on the final flush so the live snapshots don't spam stdout.
+            print(
+                f"  usage: {totals['input_tokens']:,} in, "
+                f"{totals['output_tokens']:,} out, "
+                f"{totals['cache_read_input_tokens']:,} cache-read; "
+                f"~${totals['estimated_cost_usd']:.4f}",
+                flush=True,
+            )
 
     @staticmethod
     def _load_pricing() -> Dict[str, Dict[str, float]]:
