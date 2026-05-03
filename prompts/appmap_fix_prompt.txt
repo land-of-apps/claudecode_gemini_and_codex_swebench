@@ -1,0 +1,17 @@
+/appmap-fix Fix the issue described in issue.md
+
+Follow the 5-step loop. Invoke appmap-record, appmap-label, appmap-analyze as sub-skills. Do not read source files until after the first recording.
+
+If the AppMap MCP is not available in this session, exit with an error. Do not substitute CLI or JSON parsing.
+
+▎ Before any other tool use:
+▎ - Do NOT read source files to form hypotheses. Recordings will surface them.
+▎ - Do NOT write a reproduction test before placing labels.
+▎ - Do NOT use appmap inspect or parse appmap JSON directly. Use the MCP verbs from appmap-analyze.
+
+To record AppMap data for this project, run `bin/record-appmap.sh` from the
+project root. It executes the project's test suite inside the SWE-bench
+container with `appmap-python` instrumentation enabled. Do not invoke
+`pytest` directly — the host has no Python environment for this project.
+Recordings will appear under `tmp/appmap/`; a host-side watcher
+indexes them automatically so the AppMap MCP tools see them within seconds.

@@ -93,3 +93,8 @@ pip-delete-this-directory.txt
 pip-log.txt
 pip-wheel-metadata/
 venv
+
+# claude-appmap backend
+/work/
+/appmap_archives/
+/appmap.yml

@@ -8,8 +8,6 @@ import json
 import os
 import sys
 import subprocess
-import tempfile
-import shutil
 from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -19,6 +17,7 @@ from tqdm import tqdm
 import jsonlines
 
 from utils.claude_interface import ClaudeCodeInterface
+from utils.claude_appmap_interface import ClaudeAppMapInterface
 from utils.codex_interface import CodexCodeInterface
 from utils.gemini_interface import GeminiCodeInterface
 from utils.prompt_formatter import PromptFormatter
@@ -40,6 +39,8 @@ class CodeSWEAgent:
             self.interface = CodexCodeInterface()
         elif self.backend == "gemini":
             self.interface = GeminiCodeInterface()
+        elif self.backend == "claude-appmap":
+            self.interface = ClaudeAppMapInterface()
         else:
             self.backend = "claude"
             self.interface = ClaudeCodeInterface()
@@ -61,26 +62,35 @@ class CodeSWEAgent:
         self.pred_file: Optional[Path] = None
 
     def setup_repository(self, instance: Dict) -> Optional[str]:
-        """Set up a repository for testing."""
+        """Set up a repository for testing.
+
+        Layout: <work_root>/<instance_id>/<timestamp>/repo
+
+        work_root defaults to <repo_root>/work but can be overridden by
+        SWE_BENCH_WORK_DIR. The intermediate timestamp directory means
+        repeated runs of the same instance never collide and outputs
+        accumulate one-per-run for inspection. The orchestrator no longer
+        wipes the workspace at the end — clean ./work/ manually if needed.
+        """
         instance_id = instance["instance_id"]
         repo_name = instance["repo"]
         base_commit = instance["base_commit"]
 
-        # Create temporary directory for this instance (cross-platform)
-        temp_dir = Path(tempfile.gettempdir()) / f"swe_bench_{instance_id}"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        work_root = Path(os.environ.get("SWE_BENCH_WORK_DIR",
+                                        str(self.base_dir / "work")))
+        run_dir = work_root / instance_id / timestamp
+        temp_dir = run_dir / "repo"
+        run_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Remove if exists
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-
             # Save current directory
             original_dir = Path.cwd()
-            
+
             # Clone repository
             print(f"Cloning {repo_name} to {temp_dir}")
             clone_url = f"https://github.com/{repo_name}.git"
-            
+
             result = subprocess.run(
                 ["git", "clone", clone_url, str(temp_dir)],
                 capture_output=True,
@@ -142,7 +152,12 @@ class CodeSWEAgent:
 
             model_info = f" with model {self.model_alias}" if self.model else ""
             print(f"Running {self.backend.title()} Code{model_info}...")
-            result = self.interface.execute_code_cli(prompt, repo_path, self.model)
+            if self.backend == "claude-appmap":
+                result = self.interface.execute_code_cli(
+                    prompt, repo_path, self.model, instance=instance
+                )
+            else:
+                result = self.interface.execute_code_cli(prompt, repo_path, self.model)
 
             if not result["success"]:
                 print(f"{self.backend.title()} Code execution failed: {result['stderr']}")
@@ -185,8 +200,8 @@ class CodeSWEAgent:
             except Exception as e:
                 print(f"Warning: Could not restore directory: {e}")
 
-            if repo_path and os.path.exists(repo_path):
-                shutil.rmtree(repo_path)
+            # Workspace is preserved under ./work/<instance_id>/<timestamp>/repo
+            # for inspection; manually clean ./work/ when no longer needed.
     def _save_result(self, instance_id: str, result: Dict, patch: str):
         """Save detailed results for debugging."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -270,7 +285,8 @@ def main():
                        help="Path to custom prompt template")
     parser.add_argument("--model", type=str,
                        help="Model to use (e.g., opus-4.1, codex-4.2, or any name)")
-    parser.add_argument("--backend", type=str, choices=["claude", "codex", "gemini"],
+    parser.add_argument("--backend", type=str,
+                       choices=["claude", "claude-appmap", "codex", "gemini"],
                        help="Code model backend to use")
     
     args = parser.parse_args()
@@ -282,6 +298,8 @@ def main():
         cli_cmd = "codex"
     elif backend == "gemini":
         cli_cmd = "gemini"
+    elif backend == "claude-appmap":
+        cli_cmd = "claude"
     else:
         cli_cmd = "claude"
 
