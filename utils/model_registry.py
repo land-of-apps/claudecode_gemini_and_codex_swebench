@@ -48,6 +48,7 @@ GEMINI_EXPECTED = {
 # Claude models
 CLAUDE_MODELS: Dict[str, str] = {
     # Opus models (most capable)
+    "claude-opus-4.7": "claude-opus-4-7",
     "claude-opus-4.1": "claude-opus-4-1-20250805",
     "claude-opus-4.0": "claude-opus-4-20250514",
 
@@ -62,8 +63,10 @@ CLAUDE_MODELS: Dict[str, str] = {
     "claude-3.5-haiku": "claude-3-5-haiku-20241022",
 
     # Aliases
+    "opus-4.7": "claude-opus-4.7",
     "opus-4.1": "claude-opus-4.1",
     "opus-4.0": "claude-opus-4.0",
+    "opus": "claude-opus-4.7",
     "sonnet-4.6": "claude-sonnet-4.6",
     "sonnet-4.5": "claude-sonnet-4.5",
     "sonnet-4": "claude-sonnet-4.0",

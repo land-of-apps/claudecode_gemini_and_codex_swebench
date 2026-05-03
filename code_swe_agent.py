@@ -28,10 +28,10 @@ from utils.model_registry import get_model_name
 DEFAULT_BACKEND = os.environ.get("CODE_SWE_BACKEND", "claude")
 
 # Default model for the claude / claude-appmap backends when --model is not
-# specified. We pin to a sonnet so the vanilla and appmap-augmented runs are
-# directly comparable; opus would muddle the cost/quality comparison and is
-# 5x more expensive per token.
-DEFAULT_CLAUDE_MODEL = os.environ.get("SWE_BENCH_DEFAULT_MODEL", "sonnet-4.6")
+# specified. Pin to opus — the appmap-fix workflow is multi-step and sonnet
+# tends to bail after step 1 or skip recording entirely, which defeats the
+# whole comparison. Override with SWE_BENCH_DEFAULT_MODEL when chasing cost.
+DEFAULT_CLAUDE_MODEL = os.environ.get("SWE_BENCH_DEFAULT_MODEL", "opus-4.7")
 
 
 class CodeSWEAgent:

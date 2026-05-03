@@ -2,6 +2,13 @@
 
 Follow the 5-step loop. Invoke appmap-record, appmap-label, appmap-analyze as sub-skills. Do not read source files until after the first recording.
 
+If the project's existing test suite has no test that exercises the bug,
+**synthesize one** — write a minimal test or standalone script that
+reproduces the failure (placed under `tests/` for pytest projects, or as
+`tests/<app>/test_repro_<id>.py` for Django) and record THAT under
+`bin/record-appmap.sh`. Do not abandon the recording step because no
+existing test triggers the bug.
+
 If the AppMap MCP is not available in this session, exit with an error. Do not substitute CLI or JSON parsing.
 
 ▎ Before any other tool use:

@@ -234,6 +234,7 @@ class ClaudeAppMapInterface:
         (clone / "appmap.yml").write_text(self._appmap_yml(instance))
         (clone / ".mcp.json").write_text(self._mcp_json())
         (clone / "issue.md").write_text(instance.get("problem_statement", ""))
+        (clone / "CLAUDE.md").write_text(self._claude_md())
         (clone / "tmp" / "appmap").mkdir(parents=True, exist_ok=True)
         bin_dir = clone / "bin"
         bin_dir.mkdir(exist_ok=True)
@@ -242,6 +243,72 @@ class ClaudeAppMapInterface:
         script.chmod(0o755)
         self._gitignore_appmap_artifacts(clone)
         self._commit_scaffolding(clone)
+
+    @staticmethod
+    def _claude_md() -> str:
+        """Project-level CLAUDE.md auto-loaded by claude on entry. Carries
+        more contextual weight than the slash-command prompt. Re-states the
+        appmap-fix workflow's hard constraints so they aren't drowned out by
+        the agent's instinct to read source code."""
+        return textwrap.dedent("""\
+            # claude-appmap workflow — read me first
+
+            This workspace is set up for AppMap-driven debugging. Follow these
+            non-negotiable rules.
+
+            ## Before reading any source file
+
+            1. Run `bin/record-appmap.sh <test-command>` to produce at least one
+               `.appmap.json` under `tmp/appmap/`.
+            2. Inspect the recording via the **AppMap MCP tools** (prefix
+               `mcp__appmap__`): `find_recordings`, `get_call_tree`,
+               `find_calls`, `function_hotspots`, `sql_hotspots`,
+               `list_labels`, etc.
+            3. Only after MCP analysis indicates which functions actually run
+               on the failing path may you `Read` or `Grep` files under the
+               project's source tree.
+
+            **Do NOT** open a project source file (`Read`, `Grep`, `Glob`)
+            before steps 1 and 2 above. The whole point of running with
+            AppMap is to let runtime data — not your priors — point you at
+            the code that matters.
+
+            ## If no existing test triggers the bug
+
+            **Synthesize one**. Write a minimal test or script that exercises
+            the failure path described in `issue.md`, place it under `tests/`
+            (or wherever the project keeps tests), and pass it as the argument
+            to `bin/record-appmap.sh`. Do not skip the recording step because
+            "no existing test reproduces the bug" — that's exactly the case
+            where you need to construct one.
+
+            ## How to record (Python projects)
+
+            `bin/record-appmap.sh` runs your test command inside the
+            project's SWE-bench container with `appmap-python` instrumentation.
+            Examples:
+
+            ```bash
+            # Django: project's own runner
+            bin/record-appmap.sh ./tests/runtests.py --settings=test_sqlite \\
+              migrations.test_repro_<issue_id>
+
+            # pytest projects
+            bin/record-appmap.sh pytest tests/test_repro_<issue_id>.py
+            ```
+
+            Recordings appear under `tmp/appmap/`; the host-side index watcher
+            picks them up within seconds and the AppMap MCP can query them.
+
+            ## Loop until fixed
+
+            Do not end your turn until the agent has:
+            (a) at least one AppMap recording, (b) at least one MCP query
+            against it, and (c) an edit to a project source file that
+            implements the fix. The `appmap.yml`, `.mcp.json`, `issue.md`,
+            `bin/record-appmap.sh`, and this `CLAUDE.md` are scaffolding —
+            edits to those don't count as a fix.
+            """)
 
     @staticmethod
     def _gitignore_appmap_artifacts(clone: Path) -> None:
@@ -270,7 +337,7 @@ class ClaudeAppMapInterface:
                "GIT_COMMITTER_EMAIL": "appmap@example.invalid"}
         subprocess.run(
             ["git", "add", "-A", "appmap.yml", ".mcp.json", "issue.md",
-             "bin/record-appmap.sh", ".gitignore"],
+             "CLAUDE.md", "bin/record-appmap.sh", ".gitignore"],
             cwd=str(clone), env=env, capture_output=True,
         )
         subprocess.run(
