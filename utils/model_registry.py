@@ -52,6 +52,7 @@ CLAUDE_MODELS: Dict[str, str] = {
     "claude-opus-4.0": "claude-opus-4-20250514",
 
     # Sonnet models
+    "claude-sonnet-4.6": "claude-sonnet-4-6",
     "claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
     "claude-sonnet-4.0": "claude-sonnet-4-20250514",
     "claude-3.7-sonnet": "claude-3-7-sonnet-20250219",
@@ -63,19 +64,22 @@ CLAUDE_MODELS: Dict[str, str] = {
     # Aliases
     "opus-4.1": "claude-opus-4.1",
     "opus-4.0": "claude-opus-4.0",
+    "sonnet-4.6": "claude-sonnet-4.6",
     "sonnet-4.5": "claude-sonnet-4.5",
     "sonnet-4": "claude-sonnet-4.0",
     "sonnet-3.7": "claude-3.7-sonnet",
-    "best": "claude-sonnet-4.5", # Or Opus 4.1 depending on preference, user said "newest Opus or Sonnet 4.5"
+    "sonnet": "claude-sonnet-4.6",
+    "best": "claude-sonnet-4.6",
     "balanced": "claude-sonnet-4.0",
     "fast": "claude-haiku-4.5",
-    "latest": "claude-sonnet-4.5",
+    "latest": "claude-sonnet-4.6",
 }
 
 CLAUDE_DESCRIPTIONS = {
     "claude-opus-4.1": "Opus 4.1 - Latest and most capable",
     "claude-opus-4.0": "Opus 4.0 - Very strong performance",
-    "claude-sonnet-4.5": "Sonnet 4.5 - State of the art balanced model",
+    "claude-sonnet-4.6": "Sonnet 4.6 - Current Sonnet, state of the art balanced",
+    "claude-sonnet-4.5": "Sonnet 4.5 - Previous Sonnet generation",
     "claude-sonnet-4.0": "Sonnet 4.0 - Strong balanced model",
     "claude-haiku-4.5": "Haiku 4.5 - Fast and smart",
     "claude-3.7-sonnet": "Sonnet 3.7 - Reliable previous gen",

@@ -27,6 +27,12 @@ from utils.model_registry import get_model_name
 
 DEFAULT_BACKEND = os.environ.get("CODE_SWE_BACKEND", "claude")
 
+# Default model for the claude / claude-appmap backends when --model is not
+# specified. We pin to a sonnet so the vanilla and appmap-augmented runs are
+# directly comparable; opus would muddle the cost/quality comparison and is
+# 5x more expensive per token.
+DEFAULT_CLAUDE_MODEL = os.environ.get("SWE_BENCH_DEFAULT_MODEL", "sonnet-4.6")
+
 
 class CodeSWEAgent:
     """Main agent for running SWE-bench using different code models."""
@@ -51,7 +57,11 @@ class CodeSWEAgent:
         self.results_dir = self.base_dir / "results"
         self.predictions_dir = self.base_dir / "predictions"
 
-        # Resolve model name from alias
+        # Resolve model name from alias. If no model was specified and we're
+        # running a claude-family backend, default to sonnet so the comparison
+        # against the appmap variant uses the same (cheaper) baseline.
+        if not model and self.backend in ("claude", "claude-appmap"):
+            model = DEFAULT_CLAUDE_MODEL
         self.model = get_model_name(model, self.backend) if model else None
         self.model_alias = model  # Keep original alias for logging
 
