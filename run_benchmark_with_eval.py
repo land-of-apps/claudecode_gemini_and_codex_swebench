@@ -15,6 +15,8 @@ import logging
 import jsonlines
 from datasets import load_dataset
 
+from utils.podman import PodmanNotReady, ensure_podman_ready, podman_env
+
 class EnhancedBenchmarkRunner:
     def __init__(self, model=None, backend="claude"):
         self.base_dir = Path.cwd()
@@ -129,7 +131,7 @@ class EnhancedBenchmarkRunner:
         return score, total
         
     def run_evaluation(self, prediction_file, dataset_name, max_workers=2):
-        """Run real SWE-bench evaluation using Docker"""
+        """Run real SWE-bench evaluation using Podman."""
         print(f"\n🔬 Running real evaluation on {prediction_file}...")
         print("This will test if patches actually fix the issues (takes time)...")
         
@@ -167,8 +169,15 @@ class EnhancedBenchmarkRunner:
             "--report_dir", str(self.eval_results_dir),
         ]
         
+        try:
+            podman_uri = ensure_podman_ready()
+        except PodmanNotReady as exc:
+            print(f"\n❌ Podman is not ready: {exc}")
+            return None, 0
+
         print(f"Running: {' '.join(cmd)}")
-        
+        print(f"DOCKER_HOST={podman_uri}")
+
         try:
             start_time = time.time()
             process = subprocess.Popen(
@@ -178,6 +187,7 @@ class EnhancedBenchmarkRunner:
                 text=True,
                 bufsize=1,
                 cwd=str(self.eval_results_dir),
+                env=podman_env(),
             )
             
             # Print output in real-time
@@ -250,9 +260,9 @@ def main():
     parser.add_argument("--limit", type=int, default=5,
                        help="Number of instances to test (default: 5)")
     parser.add_argument("--skip-eval", action="store_true",
-                       help="Skip Docker evaluation (faster but no real scores)")
+                       help="Skip Podman evaluation (faster but no real scores)")
     parser.add_argument("--max-workers", type=int, default=2,
-                       help="Max parallel Docker containers for evaluation (default: 2)")
+                       help="Max parallel Podman containers for evaluation (default: 2)")
     parser.add_argument("--notes", default="",
                        help="Optional notes about this run")
     
@@ -291,7 +301,7 @@ def main():
     evaluation_status = "skipped" if args.skip_eval else "pending"
     
     if not args.skip_eval:
-        print("\nPhase 2: Evaluating patches with Docker (testing if they work)...")
+        print("\nPhase 2: Evaluating patches with Podman (testing if they work)...")
         evaluation_score, evaluation_time = runner.run_evaluation(
             prediction_file, args.dataset, args.max_workers
         )

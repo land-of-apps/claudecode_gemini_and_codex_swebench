@@ -11,7 +11,7 @@ The SWE-bench benchmark presents the model with actual GitHub issues from popula
 ## Getting Started in 5 Minutes
 
 ```bash
-# Assuming you have Python, a code model CLI (Claude or Codex), and Docker installed:
+# Assuming you have Python, a code model CLI (Claude or Codex), and Podman installed:
 # Replace `python` with `python3` on Linux/macOS or `py` on Windows if needed.
 git clone https://github.com/jimmc414/claudecode_n_codex_swebench.git
 cd claudecode_n_codex_swebench
@@ -58,21 +58,20 @@ Before starting, ensure you have:
    # If not logged in, run the relevant CLI
    ```
 
-3. **Docker installed and running**
+3. **Podman installed and running**
    ```bash
-   docker --version  # Should show version
-   docker ps        # Should work without "daemon not running" error
+   podman --version           # Should show version
+   podman machine list        # On macOS/Windows: a machine should be "Currently running"
+   podman info >/dev/null     # Should succeed without errors
    ```
    - Needs ~50GB free disk space for images
    - 16GB+ RAM recommended
-   - For Mac/Windows: Increase Docker Desktop memory to 8GB+
-   
-   **Don't have Docker?** The easiest way is to ask Claude Code to set it up:
-   ```bash
-   claude  # Open Claude Code
-   # Then ask: "Please help me install Docker on my system"
-   ```
-   Or see [Manual Docker Setup](#docker-setup) below.
+   - On macOS/Windows: bump the Podman machine to 8GB+ memory (`podman machine set --memory 8192 --cpus 4`)
+
+   The benchmark talks to Podman via its Docker-compatible API socket. The runner
+   resolves that socket automatically and exports `DOCKER_HOST` for the SWE-bench
+   harness — no manual env setup required. See [Podman Setup](#podman-setup) below
+   if you don't have Podman installed yet.
 
 ## Installation
 
@@ -90,8 +89,8 @@ python swe_bench.py list-models --backend codex  # Codex models
 python swe_bench.py list-models --backend gemini # Gemini models
 
 # Optional: Quick test to verify full setup
-python swe_bench.py run --limit 1 --no-eval  # Test without Docker (2-5 min)
-python swe_bench.py run --limit 1            # Full test with Docker (10-15 min)
+python swe_bench.py run --limit 1 --no-eval  # Test without Podman (2-5 min)
+python swe_bench.py run --limit 1            # Full test with Podman (10-15 min)
 ```
 
 ### Troubleshooting Setup
@@ -101,10 +100,9 @@ If you get errors:
 - **"Claude CLI not found"**: Install from https://claude.ai/download
 - **"Codex CLI not found"**: Ensure `codex` is installed and in your PATH
 - **"Gemini CLI not found"**: Ensure `gemini` is installed and in your PATH
-- **"Docker daemon not running"**: Start Docker Desktop or `sudo systemctl start docker`
+- **"Podman not ready" / no socket**: macOS/Windows — `podman machine start`. Linux — `systemctl --user start podman.socket`.
 - **"swebench not found"**: Run `pip install swebench`
-- **Out of memory**: Increase Docker memory in Docker Desktop settings
-- **Permission denied (Docker)**: Add yourself to docker group: `sudo usermod -aG docker $USER` then logout/login
+- **Out of memory**: On macOS/Windows, raise the Podman machine memory: `podman machine stop && podman machine set --memory 8192 --cpus 4 && podman machine start`
 
 ## Command Reference
 
@@ -140,7 +138,7 @@ python swe_bench.py run --model sonnet-3.7 --limit 20
 python swe_bench.py run --model best --quick       # Best performance alias
 
 # Performance options
-python swe_bench.py run --quick --no-eval          # Skip Docker evaluation
+python swe_bench.py run --quick --no-eval          # Skip Podman evaluation
 python swe_bench.py run --limit 20 --max-workers 4 # More parallel containers
 
 # Dataset selection
@@ -296,7 +294,7 @@ claudecode_n_codex_swebench/
 │
 ├── predictions/              # Generated predictions (JSONL)
 ├── results/                  # Detailed Claude outputs
-├── evaluation_results/       # Docker evaluation results
+├── evaluation_results/       # Podman evaluation results
 └── backup/                   # Archived/unused files
 ```
 
@@ -332,11 +330,13 @@ which claude
 # If not found, reinstall Claude Code or add to PATH
 ```
 
-**Docker permission denied**
+**Podman socket not reachable**
 ```bash
-# Add user to docker group
-sudo usermod -aG docker $USER
-# Log out and back in for changes to take effect
+# macOS / Windows
+podman machine start
+
+# Linux (rootless, recommended)
+systemctl --user enable --now podman.socket
 ```
 
 **Out of memory during evaluation**
@@ -359,80 +359,70 @@ python swe_bench.py run --quick --max-workers 1
 
 - **benchmark_scores.log**: Main results log (JSON lines)
 - **predictions/**: All generated patches
-- **evaluation_results/**: Detailed Docker test results
+- **evaluation_results/**: Detailed Podman test results
 - **results/**: Raw Claude Code outputs for debugging
 
-## Docker Setup
+## Podman Setup
 
-If you don't have Docker installed, here's how to set it up manually:
+The benchmark runs the SWE-bench harness against Podman's Docker-compatible API.
+The runner discovers the local Podman socket and exports `DOCKER_HOST` to the
+harness automatically — you only need a running Podman.
 
 ### macOS
 ```bash
-# Download Docker Desktop from:
-# https://www.docker.com/products/docker-desktop/
-# Or use Homebrew:
-brew install --cask docker
+brew install podman
 
-# Start Docker Desktop from Applications
-# Increase memory to 8GB in Docker Desktop > Settings > Resources
+# Provision and start the Podman VM (8GB RAM / 4 CPUs is a good baseline)
+podman machine init --memory 8192 --cpus 4 --disk-size 100
+podman machine start
+
+# Sanity check
+podman info >/dev/null && echo "Podman is ready"
 ```
 
-### Ubuntu/Debian Linux
+### Ubuntu/Debian Linux (rootless, recommended)
 ```bash
-# Update packages and install prerequisites
 sudo apt update
-sudo apt install -y ca-certificates curl gnupg lsb-release
+sudo apt install -y podman
 
-# Add Docker's official GPG key
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+# Enable the user-level API socket that docker-py will talk to
+systemctl --user enable --now podman.socket
 
-# Set up repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Sanity check
+podman info >/dev/null && echo "Podman is ready"
+```
 
-# Install Docker
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io
-
-# Add your user to docker group (avoids needing sudo)
-sudo usermod -aG docker $USER
-# Log out and back in for this to take effect
-
-# Start Docker
-sudo systemctl start docker
-sudo systemctl enable docker
-
-# Verify installation
-docker run hello-world
+### Fedora / RHEL
+```bash
+sudo dnf install -y podman
+systemctl --user enable --now podman.socket
 ```
 
 ### Windows
-```bash
-# Download Docker Desktop from:
-# https://www.docker.com/products/docker-desktop/
+```powershell
+# Install via winget (or download from https://podman.io/)
+winget install --id RedHat.Podman
 
-# Requirements:
-# - Windows 10/11 64-bit with WSL 2
-# - Enable virtualization in BIOS
-# - Install WSL 2 first if needed:
-wsl --install
-
-# After installing Docker Desktop:
-# - Increase memory to 8GB in Settings > Resources
-# - Ensure WSL 2 backend is enabled
+podman machine init --memory 8192 --cpus 4 --disk-size 100
+podman machine start
 ```
 
-### Verify Docker is Ready
+### Verify Podman is Ready
 ```bash
-# Check Docker is installed
-docker --version
+# Version and daemon status
+podman --version
+podman info >/dev/null
 
-# Check Docker daemon is running
-docker ps
+# (macOS/Windows only) machine should be running
+podman machine list
 
-# Test Docker works
-docker run hello-world
+# Smoke test
+podman run --rm hello-world
 ```
+
+### Apple Silicon note
+SWE-bench images are `linux/amd64`. Podman emulates via QEMU on Apple Silicon,
+which works but is slower than native runs. Expect longer evaluation times.
 
 
 ## License

@@ -45,7 +45,7 @@ python swe_bench.py run --model claude-opus-4-1-20250805 --full
 # Skip evaluation (generation only)
 python swe_bench.py run --quick --no-eval
 
-# More parallel Docker workers
+# More parallel Podman workers
 python swe_bench.py run --limit 20 --max-workers 4
 # Use Codex backend
 python swe_bench.py run --quick --backend codex

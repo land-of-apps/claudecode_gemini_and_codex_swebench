@@ -40,7 +40,7 @@ claudecode_swe_bench/
 │   ├── instance_*.json
 │   └── ...
 │
-├── evaluation_results/          # KEEP - Docker evaluation results
+├── evaluation_results/          # KEEP - Podman evaluation results
 │   ├── [timestamp]/
 │   └── ...
 │
@@ -68,7 +68,7 @@ __pycache__/                    # Python cache - regenerates automatically
 
 ### Should Keep (Your Data):
 - `predictions/` - Your test results
-- `evaluation_results/` - Docker test results  
+- `evaluation_results/` - Podman test results  
 - `logs/` - Debugging information
 - `results/` - Claude outputs
 - `benchmark_scores.log` - Score history

@@ -99,7 +99,7 @@ def run_command(args):
             evaluation_score = None
             evaluation_time = 0
         else:
-            print("\nPhase 2: Evaluating patches with Docker...")
+            print("\nPhase 2: Evaluating patches with Podman...")
             evaluation_score, evaluation_time = runner.run_evaluation(
                 prediction_file, args.dataset, args.max_workers
             )
@@ -370,9 +370,9 @@ Examples:
     run_parser.add_argument('--quick', action='store_true', help='Quick test (10 instances)')
     run_parser.add_argument('--standard', action='store_true', help='Standard test (50 instances)')
     run_parser.add_argument('--full', action='store_true', help='Full test (300 instances)')
-    run_parser.add_argument('--no-eval', action='store_true', help='Skip Docker evaluation')
+    run_parser.add_argument('--no-eval', action='store_true', help='Skip Podman evaluation')
     run_parser.add_argument('--dataset', default='princeton-nlp/SWE-bench_Lite', help='Dataset to use')
-    run_parser.add_argument('--max-workers', type=int, default=2, help='Max parallel Docker containers')
+    run_parser.add_argument('--max-workers', type=int, default=2, help='Max parallel Podman containers')
     run_parser.add_argument('--notes', default='', help='Optional notes about this run')
     run_parser.add_argument('--model', type=str, help='Model to use (e.g., opus-4.1, codex-4.2)')
     run_parser.add_argument('--backend', type=str, choices=['claude', 'codex', 'gemini'], help='Code model backend')
@@ -387,7 +387,7 @@ Examples:
     eval_group.add_argument('--pattern', type=str, help='Files matching pattern')
     eval_group.add_argument('--interactive', action='store_true', help='Interactive selection (default)')
     eval_parser.add_argument('--dataset', default='princeton-nlp/SWE-bench_Lite', help='Dataset name')
-    eval_parser.add_argument('--max-workers', type=int, default=2, help='Max parallel Docker containers')
+    eval_parser.add_argument('--max-workers', type=int, default=2, help='Max parallel Podman containers')
     eval_parser.add_argument('--dry-run', action='store_true', help='Show what would be evaluated')
     eval_parser.add_argument('--no-update-log', action='store_true', help="Don't update log file")
     eval_parser.add_argument('--force', '--yes', action='store_true',

@@ -17,6 +17,8 @@ import jsonlines
 from typing import List, Tuple
 import logging
 
+from utils.podman import PodmanNotReady, ensure_podman_ready, podman_env
+
 class PredictionEvaluator:
     def __init__(self):
         self.base_dir = Path.cwd()
@@ -206,9 +208,15 @@ class PredictionEvaluator:
             "--report_dir", str(self.eval_results_dir),
         ]
         
-        print(f"\n🔬 Running Docker evaluation...")
+        try:
+            podman_uri = ensure_podman_ready()
+        except PodmanNotReady as exc:
+            print(f"\n❌ Podman is not ready: {exc}")
+            return None, 0
+
+        print(f"\n🔬 Running Podman evaluation (DOCKER_HOST={podman_uri})...")
         print(f"Command: {' '.join(cmd)}")
-        
+
         try:
             start_time = time.time()
             process = subprocess.Popen(
@@ -218,6 +226,7 @@ class PredictionEvaluator:
                 text=True,
                 bufsize=1,
                 cwd=str(self.eval_results_dir),
+                env=podman_env(),
             )
             
             output_lines = []
@@ -340,7 +349,7 @@ def main():
     parser.add_argument("--dataset", default="princeton-nlp/SWE-bench_Lite",
                        help="Dataset name")
     parser.add_argument("--max-workers", type=int, default=2,
-                       help="Max parallel Docker containers")
+                       help="Max parallel Podman containers")
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be evaluated without running")
     parser.add_argument("--no-update-log", action="store_true",
