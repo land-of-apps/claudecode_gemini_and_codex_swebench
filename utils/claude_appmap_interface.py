@@ -229,14 +229,31 @@ class ClaudeAppMapInterface:
 
     @staticmethod
     def _issue_md(instance: Dict) -> str:
-        """Mirror the vanilla SWE-bench prompt: problem statement, then any
-        `hints_text`. The vanilla `claude` backend (via PromptFormatter)
-        gets both; we must too, or the comparison is unfair."""
-        body = instance.get("problem_statement", "") or ""
-        hints = instance.get("hints_text", "") or ""
-        if hints.strip():
-            body = body.rstrip() + "\n\nHints:\n" + hints
-        return body
+        """Mirror every input the vanilla SWE-bench PromptFormatter feeds to
+        claude: instance_id, repo, base_commit, problem statement, and any
+        hints_text. Anything the vanilla baseline sees, the appmap variant
+        must see too — otherwise the comparison is unfair."""
+        instance_id = instance.get("instance_id", "")
+        repo = instance.get("repo", "")
+        base_commit = instance.get("base_commit", "")
+        problem = (instance.get("problem_statement") or "").rstrip()
+        hints = (instance.get("hints_text") or "").strip()
+
+        parts = []
+        if instance_id:
+            parts.append(f"# Instance: {instance_id}")
+        meta = []
+        if repo:
+            meta.append(f"Repository: {repo}")
+        if base_commit:
+            meta.append(f"Base commit: {base_commit}")
+        if meta:
+            parts.append("\n".join(meta))
+        if problem:
+            parts.append("## Problem description\n\n" + problem)
+        if hints:
+            parts.append("## Hints\n\n" + hints)
+        return "\n\n".join(parts) + "\n"
 
     @staticmethod
     def _claude_md() -> str:
