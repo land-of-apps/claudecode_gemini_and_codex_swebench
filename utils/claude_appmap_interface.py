@@ -54,6 +54,16 @@ ARCHIVES_DIR = Path(
 
 _INDEX_DB_RE = re.compile(r"/\.appmap/data/([0-9a-f]+)/query\.db")
 
+# Anthropic public list pricing as of 2026-05, USD per 1M tokens.
+# Update or override with APPMAP_PRICING_JSON env var (path to JSON file with
+# the same shape) when prices change. Cost estimates are for comparison
+# between runs, not for billing.
+_PRICING_PER_MTOK = {
+    "claude-opus-4":     {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+    "claude-sonnet-4":   {"input":  3.0, "output": 15.0, "cache_read": 0.30, "cache_write":  3.75},
+    "claude-haiku-4":    {"input":  1.0, "output":  5.0, "cache_read": 0.10, "cache_write":  1.25},
+}
+
 
 class ClaudeAppMapInterface:
     """Claude on host, recording sandbox in podman."""
@@ -148,6 +158,10 @@ class ClaudeAppMapInterface:
                 self._archive_session_logs(clone, instance_id)
             except Exception as e:
                 print(f"  warning: failed to archive session logs: {e}", flush=True)
+            try:
+                self._compute_and_save_usage(clone, instance_id)
+            except Exception as e:
+                print(f"  warning: failed to compute usage stats: {e}", flush=True)
             try:
                 self._wipe_appmap_data(clone)
             except Exception as e:
@@ -363,6 +377,128 @@ class ClaudeAppMapInterface:
                 copied.append(jsonl.name)
         if copied:
             print(f"  archived {len(copied)} session log(s) → {target_root}", flush=True)
+
+    def _compute_and_save_usage(self, clone: Path, instance_id: str) -> None:
+        """Aggregate per-message `usage` blocks from the archived session logs
+        and write <run_dir>/usage.json with token totals + estimated $ cost.
+
+        For comparing claude vs claude-appmap on the same instance the raw
+        token counts are the durable signal; cost is a snapshot of public
+        list pricing (see _PRICING_PER_MTOK)."""
+        run_dir = self._resolve_run_dir(clone, instance_id)
+        sessions_dir = run_dir / "sessions"
+        if not sessions_dir.is_dir():
+            return
+
+        pricing = self._load_pricing()
+        per_model: Dict[str, Dict[str, int]] = {}
+        first_ts: Optional[str] = None
+        last_ts: Optional[str] = None
+
+        for jsonl in sorted(sessions_dir.glob("*.jsonl")):
+            with jsonl.open(errors="ignore") as f:
+                for line in f:
+                    try:
+                        d = json.loads(line)
+                    except Exception:
+                        continue
+                    ts = d.get("timestamp")
+                    if isinstance(ts, str):
+                        if first_ts is None or ts < first_ts:
+                            first_ts = ts
+                        if last_ts is None or ts > last_ts:
+                            last_ts = ts
+                    msg = d.get("message", {}) or {}
+                    if not isinstance(msg, dict):
+                        continue
+                    model = msg.get("model")
+                    usage = msg.get("usage")
+                    if not (model and isinstance(usage, dict)):
+                        continue
+                    bucket = per_model.setdefault(model, {
+                        "messages": 0,
+                        "input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": 0,
+                    })
+                    bucket["messages"] += 1
+                    for k in ("input_tokens", "cache_read_input_tokens",
+                              "cache_creation_input_tokens", "output_tokens"):
+                        v = usage.get(k, 0)
+                        if isinstance(v, int):
+                            bucket[k] += v
+
+        models_out: Dict[str, Dict[str, object]] = {}
+        totals = {"input_tokens": 0, "cache_read_input_tokens": 0,
+                  "cache_creation_input_tokens": 0, "output_tokens": 0,
+                  "estimated_cost_usd": 0.0}
+        for model, b in per_model.items():
+            cost = self._estimate_cost(model, b, pricing)
+            models_out[model] = {**b, "estimated_cost_usd": round(cost, 6)}
+            for k in ("input_tokens", "cache_read_input_tokens",
+                      "cache_creation_input_tokens", "output_tokens"):
+                totals[k] += b[k]
+            totals["estimated_cost_usd"] += cost
+        totals["estimated_cost_usd"] = round(totals["estimated_cost_usd"], 6)
+
+        wall_seconds: Optional[float] = None
+        if first_ts and last_ts:
+            try:
+                wall_seconds = (datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                                - datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
+                                ).total_seconds()
+            except Exception:
+                pass
+
+        out = {
+            "instance_id": instance_id,
+            "first_timestamp": first_ts,
+            "last_timestamp": last_ts,
+            "wall_seconds": wall_seconds,
+            "models": models_out,
+            "totals": totals,
+            "pricing_source": ("env:APPMAP_PRICING_JSON" if os.environ.get("APPMAP_PRICING_JSON")
+                               else "builtin: see _PRICING_PER_MTOK"),
+        }
+        (run_dir / "usage.json").write_text(json.dumps(out, indent=2))
+        print(
+            f"  usage: {totals['input_tokens']:,} in, "
+            f"{totals['output_tokens']:,} out, "
+            f"{totals['cache_read_input_tokens']:,} cache-read; "
+            f"~${totals['estimated_cost_usd']:.4f}",
+            flush=True,
+        )
+
+    @staticmethod
+    def _load_pricing() -> Dict[str, Dict[str, float]]:
+        override = os.environ.get("APPMAP_PRICING_JSON")
+        if override and Path(override).is_file():
+            try:
+                return json.loads(Path(override).read_text())
+            except Exception:
+                pass
+        return _PRICING_PER_MTOK
+
+    @staticmethod
+    def _estimate_cost(model: str, usage: Dict[str, int],
+                       pricing: Dict[str, Dict[str, float]]) -> float:
+        # Match by family prefix so e.g. claude-opus-4-7 falls under claude-opus-4.
+        rates = None
+        for family, r in pricing.items():
+            if model.startswith(family):
+                rates = r
+                break
+        if not rates:
+            return 0.0
+        per_tok = lambda key: rates.get(key, 0.0) / 1_000_000.0
+        cost = (
+            usage.get("input_tokens", 0)               * per_tok("input")
+            + usage.get("output_tokens", 0)            * per_tok("output")
+            + usage.get("cache_read_input_tokens", 0)  * per_tok("cache_read")
+            + usage.get("cache_creation_input_tokens", 0) * per_tok("cache_write")
+        )
+        return cost
 
     def _wipe_appmap_data(self, clone: Path) -> None:
         """Remove this run's appmap data and host index DB so the next run
