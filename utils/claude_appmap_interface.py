@@ -31,6 +31,9 @@ import shutil
 import signal
 import subprocess
 import textwrap
+import threading
+import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -118,11 +121,23 @@ class ClaudeAppMapInterface:
         except Exception as e:
             return _fail(f"setup failed: {e}")
 
+        # Hoist run_dir up-front so the live-log thread can write into it.
+        run_dir = self._resolve_run_dir(clone, instance_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        # Pinning the session id makes the source JSONL deterministically
+        # findable; the live-log thread then symlinks it into run_dir so
+        # session.jsonl reflects the agent's writes in real time, and
+        # console.log carries a human-readable per-step stream.
+        session_id = str(uuid.uuid4())
+        live_stop = self._start_live_log(session_id, run_dir)
+
         watcher = self._start_watcher(clone)
         try:
             cmd = ["claude",
                    "--mcp-config", str(clone / ".mcp.json"),
                    "--strict-mcp-config",
+                   "--session-id", session_id,
                    "--dangerously-skip-permissions"]
             if model:
                 cmd += ["--model", model]
@@ -146,6 +161,7 @@ class ClaudeAppMapInterface:
             return _fail(str(e))
         finally:
             self._stop_watcher(watcher)
+            live_stop.set()
             # Archive recordings + claude session logs alongside the clone so
             # the run is self-contained for analysis. Then wipe the host index
             # DB for this run's SHA so ~/.appmap/data doesn't grow over 300
@@ -323,6 +339,114 @@ class ClaudeAppMapInterface:
                 os.killpg(p.pid, signal.SIGKILL)
             except Exception:
                 pass
+
+    # ---- live session log -----------------------------------------------
+
+    def _start_live_log(self, session_id: str, run_dir: Path) -> threading.Event:
+        """Symlink the claude session JSONL into run_dir as soon as it appears,
+        and stream a human-readable console.log of tool calls + assistant text
+        in parallel. Returns a stop Event the caller sets when claude exits."""
+        stop = threading.Event()
+
+        def watcher() -> None:
+            projects = Path.home() / ".claude" / "projects"
+            symlink = run_dir / "session.jsonl"
+            console = run_dir / "console.log"
+            src: Optional[Path] = None
+            # Wait for claude to create the file. claude only writes once it
+            # processes the first prompt event, so a few seconds is normal.
+            deadline = time.time() + 60
+            while not stop.is_set() and src is None and time.time() < deadline:
+                matches = list(projects.glob(f"*/{session_id}.jsonl"))
+                if matches:
+                    src = matches[0]
+                    break
+                time.sleep(0.5)
+            if src is None:
+                return
+            try:
+                if symlink.exists() or symlink.is_symlink():
+                    symlink.unlink()
+                symlink.symlink_to(src)
+            except Exception as e:
+                print(f"  warning: session symlink failed: {e}", flush=True)
+            try:
+                with src.open("r", errors="ignore") as f, console.open("a") as out:
+                    out.write(f"# session_id={session_id}\n# source={src}\n")
+                    out.flush()
+                    buf = ""
+                    while not stop.is_set():
+                        chunk = f.read()
+                        if chunk:
+                            buf += chunk
+                            while "\n" in buf:
+                                line, buf = buf.split("\n", 1)
+                                formatted = self._format_session_line(line)
+                                if formatted:
+                                    out.write(formatted + "\n")
+                                    out.flush()
+                        else:
+                            time.sleep(0.5)
+            except Exception as e:
+                print(f"  warning: live log writer stopped: {e}", flush=True)
+
+        threading.Thread(target=watcher, daemon=True).start()
+        return stop
+
+    @staticmethod
+    def _format_session_line(line: str) -> Optional[str]:
+        """Turn one JSONL record into 0+ human-readable lines (joined by \\n)."""
+        try:
+            d = json.loads(line)
+        except Exception:
+            return None
+        ts = (d.get("timestamp") or "")[11:19]
+        msg = d.get("message", {})
+        if not isinstance(msg, dict):
+            return None
+        content = msg.get("content")
+        if isinstance(content, str):
+            text = content[:200].replace("\n", " ").strip()
+            return f"[{ts}] {msg.get('role','?').upper()}: {text}" if text else None
+        if not isinstance(content, list):
+            return None
+        out: List[str] = []
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            t = c.get("type")
+            if t == "tool_use":
+                name = c.get("name", "?")
+                summary = ClaudeAppMapInterface._summarize_tool_input(name, c.get("input", {}))
+                out.append(f"[{ts}] → {name}({summary})")
+            elif t == "text":
+                text = (c.get("text") or "").strip().replace("\n", " ")
+                if text:
+                    out.append(f"[{ts}]   {text[:300]}")
+            elif t == "tool_result":
+                o = c.get("content", "")
+                if isinstance(o, list):
+                    o = (o[0] or {}).get("text", "") if o else ""
+                o = str(o)[:160].replace("\n", " ").strip()
+                if o:
+                    out.append(f"[{ts}]   ← {o}")
+        return "\n".join(out) if out else None
+
+    @staticmethod
+    def _summarize_tool_input(name: str, inp: Dict) -> str:
+        if not isinstance(inp, dict):
+            return ""
+        if name in ("Read", "Edit", "Write"):
+            return inp.get("file_path", "")
+        if name == "Bash":
+            return (inp.get("command", "")[:120]).replace("\n", " ")
+        if name == "Grep":
+            return inp.get("pattern", "")[:80]
+        if name == "Glob":
+            return inp.get("pattern", "")
+        if name.startswith("mcp__"):
+            return ", ".join(f"{k}={v}" for k, v in list(inp.items())[:3])
+        return ", ".join(list(inp.keys()))[:80]
 
     # ---- archive + cleanup -----------------------------------------------
 
