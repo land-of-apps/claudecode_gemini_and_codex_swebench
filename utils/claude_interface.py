@@ -1,21 +1,31 @@
+"""Vanilla `claude` backend.
+
+Runs claude on the host with the SWE-bench prompt on stdin. Mirrors the
+session log + console output + cost stats into the run dir using the
+shared machinery in `utils.claude_session`, so the post-run artifacts
+match what `claude-appmap` produces (the only difference is no AppMap
+recordings)."""
+
 import os
-import json
 import subprocess
+import uuid
+from pathlib import Path
 from typing import Dict, List, Optional
+
 from dotenv import load_dotenv
 
+from utils import claude_session
+
 load_dotenv()
+
 
 class ClaudeCodeInterface:
     """Interface for interacting with Claude Code CLI."""
 
     def __init__(self):
-        """Ensure the Claude CLI is available on the system."""
         try:
-            result = subprocess.run([
-                "claude", "--version"
-            ], capture_output=True, text=True)
-            if result.returncode != 0:
+            r = subprocess.run(["claude", "--version"], capture_output=True, text=True)
+            if r.returncode != 0:
                 raise RuntimeError(
                     "Claude CLI not found. Please ensure 'claude' is installed and in PATH"
                 )
@@ -24,47 +34,54 @@ class ClaudeCodeInterface:
                 "Claude CLI not found. Please ensure 'claude' is installed and in PATH"
             )
 
-    def execute_code_cli(self, prompt: str, cwd: str, model: str = None) -> Dict[str, any]:
+    def execute_code_cli(
+        self,
+        prompt: str,
+        cwd: str,
+        model: Optional[str] = None,
+        instance: Optional[Dict] = None,
+    ) -> Dict[str, object]:
         """Execute Claude Code via CLI and capture the response.
 
         Args:
-            prompt: The prompt to send to Claude.
-            cwd: Working directory to execute in.
-            model: Optional model to use (e.g., 'opus-4.1', 'sonnet-3.7').
+            prompt: The prompt to send to Claude (initial stdin input).
+            cwd: Working directory (the cloned repo).
+            model: Optional model alias / full ID.
+            instance: SWE-bench instance dict; only used to derive the
+                instance_id for the per-run output directory. Optional for
+                back-compat with callers that don't pass it.
         """
+        clone = Path(cwd).resolve()
+        instance_id = (instance or {}).get("instance_id", clone.parent.parent.name
+                                            if clone.parent.parent.name != "work" else "unknown")
+        run_dir = claude_session.resolve_run_dir(clone, instance_id)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        session_id = str(uuid.uuid4())
+        live_stop = claude_session.start_live_log(session_id, run_dir)
+
+        cmd = ["claude",
+               "--session-id", session_id,
+               "--dangerously-skip-permissions"]
+        if model:
+            cmd.extend(["--model", model])
+
         try:
-            # Save the current directory
-            original_cwd = os.getcwd()
-
-            # Change to the working directory
-            os.chdir(cwd)
-
-            # Build command with optional model parameter
-            cmd = ["claude", "--dangerously-skip-permissions"]
-            if model:
-                cmd.extend(["--model", model])
-
-            # Execute claude command with the prompt via stdin
             result = subprocess.run(
                 cmd,
                 input=prompt,
+                cwd=str(clone),
                 capture_output=True,
                 text=True,
-                timeout=600,  # 10 minute timeout
+                timeout=600,
             )
-
-            # Restore original directory
-            os.chdir(original_cwd)
-
             return {
                 "success": result.returncode == 0,
                 "stdout": result.stdout,
                 "stderr": result.stderr,
                 "returncode": result.returncode,
             }
-
         except subprocess.TimeoutExpired:
-            os.chdir(original_cwd)
             return {
                 "success": False,
                 "stdout": "",
@@ -72,16 +89,22 @@ class ClaudeCodeInterface:
                 "returncode": -1,
             }
         except Exception as e:
-            os.chdir(original_cwd)
             return {
                 "success": False,
                 "stdout": "",
                 "stderr": str(e),
                 "returncode": -1,
             }
+        finally:
+            live_stop.set()
+            try:
+                claude_session.archive_session_logs(clone, run_dir)
+            except Exception as e:
+                print(f"  warning: failed to archive session logs: {e}", flush=True)
+            try:
+                claude_session.compute_and_save_usage(run_dir, instance_id)
+            except Exception as e:
+                print(f"  warning: failed to compute usage stats: {e}", flush=True)
 
     def extract_file_changes(self, response: str) -> List[Dict[str, str]]:
-        """Extract file changes from Claude's response."""
-        # This will be implemented by patch_extractor.py
-        # For now, return empty list
         return []

@@ -25,18 +25,16 @@ binary at ~/bin/appmap. The binary's `query mcp` is stale.
 
 import json
 import os
-import re
 import shlex
 import shutil
 import signal
 import subprocess
 import textwrap
-import threading
-import time
 import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
+
+from utils import claude_session
 
 
 APPMAP_CLI_JS = os.environ.get(
@@ -51,21 +49,6 @@ SKILLS_DIR = os.environ.get(
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PROMPT_TEMPLATE_PATH = REPO_ROOT / "prompts" / "appmap_fix_prompt.txt"
-ARCHIVES_DIR = Path(
-    os.environ.get("APPMAP_ARCHIVES_DIR", str(REPO_ROOT / "appmap_archives"))
-)
-
-_INDEX_DB_RE = re.compile(r"/\.appmap/data/([0-9a-f]+)/query\.db")
-
-# Anthropic public list pricing as of 2026-05, USD per 1M tokens.
-# Update or override with APPMAP_PRICING_JSON env var (path to JSON file with
-# the same shape) when prices change. Cost estimates are for comparison
-# between runs, not for billing.
-_PRICING_PER_MTOK = {
-    "claude-opus-4":     {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-    "claude-sonnet-4":   {"input":  3.0, "output": 15.0, "cache_read": 0.30, "cache_write":  3.75},
-    "claude-haiku-4":    {"input":  1.0, "output":  5.0, "cache_read": 0.10, "cache_write":  1.25},
-}
 
 
 class ClaudeAppMapInterface:
@@ -122,15 +105,15 @@ class ClaudeAppMapInterface:
             return _fail(f"setup failed: {e}")
 
         # Hoist run_dir up-front so the live-log thread can write into it.
-        run_dir = self._resolve_run_dir(clone, instance_id)
+        run_dir = claude_session.resolve_run_dir(clone, instance_id)
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Pinning the session id makes the source JSONL deterministically
-        # findable; the live-log thread then symlinks it into run_dir so
-        # session.jsonl reflects the agent's writes in real time, and
+        # findable; the shared live-log thread then symlinks it into run_dir
+        # so session.jsonl reflects the agent's writes in real time, and
         # console.log carries a human-readable per-step stream.
         session_id = str(uuid.uuid4())
-        live_stop = self._start_live_log(session_id, run_dir)
+        live_stop = claude_session.start_live_log(session_id, run_dir)
 
         watcher = self._start_watcher(clone)
         try:
@@ -167,15 +150,15 @@ class ClaudeAppMapInterface:
             # DB for this run's SHA so ~/.appmap/data doesn't grow over 300
             # instances.
             try:
-                self._archive_appmap_data(clone, instance_id)
+                self._archive_appmap_data(clone, instance_id, run_dir)
             except Exception as e:
                 print(f"  warning: failed to archive appmap data: {e}", flush=True)
             try:
-                self._archive_session_logs(clone, instance_id)
+                claude_session.archive_session_logs(clone, run_dir)
             except Exception as e:
                 print(f"  warning: failed to archive session logs: {e}", flush=True)
             try:
-                self._compute_and_save_usage(clone, instance_id)
+                claude_session.compute_and_save_usage(run_dir, instance_id)
             except Exception as e:
                 print(f"  warning: failed to compute usage stats: {e}", flush=True)
             try:
@@ -319,6 +302,7 @@ class ClaudeAppMapInterface:
             f"\n{marker} runtime artifacts\n"
             "/tmp/appmap/\n"
             "/tmp/appmap-watch.log\n"
+            "/appmap.log\n"
         )
         gi = clone / ".gitignore"
         existing = gi.read_text() if gi.exists() else ""
@@ -419,7 +403,7 @@ class ClaudeAppMapInterface:
             ["node", APPMAP_CLI_JS, "index"],
             cwd=str(clone), check=False, capture_output=True, text=True,
         )
-        m = _INDEX_DB_RE.search((r.stdout or "") + (r.stderr or ""))
+        m = claude_session.INDEX_DB_RE.search((r.stdout or "") + (r.stderr or ""))
         return m.group(1) if m else None
 
     @staticmethod
@@ -444,364 +428,21 @@ class ClaudeAppMapInterface:
             except Exception:
                 pass
 
-    # ---- live session log -----------------------------------------------
-
-    def _start_live_log(self, session_id: str, run_dir: Path) -> threading.Event:
-        """Symlink the claude session JSONL into run_dir as soon as it appears,
-        and stream a human-readable console.log of tool calls + assistant text
-        in parallel. Returns a stop Event the caller sets when claude exits."""
-        stop = threading.Event()
-
-        def watcher() -> None:
-            projects = Path.home() / ".claude" / "projects"
-            symlink = run_dir / "session.jsonl"
-            console = run_dir / "console.log"
-            src: Optional[Path] = None
-            # Wait for claude to create the file. claude only writes once it
-            # processes the first prompt event, so a few seconds is normal.
-            deadline = time.time() + 60
-            while not stop.is_set() and src is None and time.time() < deadline:
-                matches = list(projects.glob(f"*/{session_id}.jsonl"))
-                if matches:
-                    src = matches[0]
-                    break
-                time.sleep(0.5)
-            if src is None:
-                return
-            try:
-                if symlink.exists() or symlink.is_symlink():
-                    symlink.unlink()
-                symlink.symlink_to(src)
-            except Exception as e:
-                print(f"  warning: session symlink failed: {e}", flush=True)
-            try:
-                last_usage_flush = 0.0
-                with src.open("r", errors="ignore") as f, console.open("a") as out:
-                    out.write(f"# session_id={session_id}\n# source={src}\n")
-                    out.flush()
-                    buf = ""
-                    while not stop.is_set():
-                        chunk = f.read()
-                        if chunk:
-                            buf += chunk
-                            while "\n" in buf:
-                                line, buf = buf.split("\n", 1)
-                                formatted = self._format_session_line(line)
-                                if formatted:
-                                    out.write(formatted + "\n")
-                                    out.flush()
-                        else:
-                            time.sleep(0.5)
-                        # Flush an in-progress usage snapshot every ~5s so
-                        # `cat <run_dir>/usage.json` always shows current cost.
-                        now = time.time()
-                        if now - last_usage_flush >= 5.0:
-                            last_usage_flush = now
-                            try:
-                                self._flush_live_usage(src, run_dir)
-                            except Exception:
-                                pass
-            except Exception as e:
-                print(f"  warning: live log writer stopped: {e}", flush=True)
-
-        threading.Thread(target=watcher, daemon=True).start()
-        return stop
-
-    @staticmethod
-    def _format_session_line(line: str) -> Optional[str]:
-        """Turn one JSONL record into 0+ human-readable lines.
-
-        No content is truncated — session.jsonl already has the raw form, but
-        this view should also preserve everything for readability without
-        forcing the user to re-parse JSON. Multi-line tool inputs / results
-        are wrapped with a continuation indent so the "one event per stanza"
-        rhythm survives."""
-        try:
-            d = json.loads(line)
-        except Exception:
-            return None
-        ts = (d.get("timestamp") or "")[11:19]
-        msg = d.get("message", {})
-        if not isinstance(msg, dict):
-            return None
-        content = msg.get("content")
-        if isinstance(content, str):
-            text = content.strip()
-            if not text:
-                return None
-            return ClaudeAppMapInterface._wrap_lines(
-                f"[{ts}] {msg.get('role','?').upper()}: ", text
-            )
-        if not isinstance(content, list):
-            return None
-        out: List[str] = []
-        for c in content:
-            if not isinstance(c, dict):
-                continue
-            t = c.get("type")
-            if t == "tool_use":
-                name = c.get("name", "?")
-                summary = ClaudeAppMapInterface._summarize_tool_input(name, c.get("input", {}))
-                out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}] → {name}(", summary, suffix=")"))
-            elif t == "text":
-                text = (c.get("text") or "").strip()
-                if text:
-                    out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}]   ", text))
-            elif t == "tool_result":
-                o = c.get("content", "")
-                if isinstance(o, list):
-                    o = (o[0] or {}).get("text", "") if o else ""
-                o = str(o).strip()
-                if o:
-                    out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}]   ← ", o))
-        return "\n".join(out) if out else None
-
-    @staticmethod
-    def _wrap_lines(prefix: str, body: str, suffix: str = "") -> str:
-        """Emit body under prefix, prepending a continuation indent on
-        subsequent lines so the timestamp column stays aligned."""
-        lines = body.splitlines() or [""]
-        indent = " " * len(prefix)
-        first = prefix + lines[0]
-        if len(lines) == 1:
-            return first + suffix
-        rest = [indent + line for line in lines[1:]]
-        if suffix:
-            rest[-1] = rest[-1] + suffix
-        return "\n".join([first, *rest])
-
-    @staticmethod
-    def _summarize_tool_input(name: str, inp: Dict) -> str:
-        """Pick the most informative field for a tool call. Returns full
-        content (no truncation) — the wrapper handles multi-line layout."""
-        if not isinstance(inp, dict):
-            return ""
-        if name in ("Read", "Edit", "Write"):
-            base = inp.get("file_path", "")
-            extras = []
-            for k in ("offset", "limit", "old_string", "new_string", "content"):
-                v = inp.get(k)
-                if v is not None:
-                    extras.append(f"{k}={v!r}" if isinstance(v, (int, str)) and len(str(v)) < 60
-                                  else f"{k}=<{len(str(v))} chars>")
-            return base + (" " + ", ".join(extras) if extras else "")
-        if name == "Bash":
-            cmd = inp.get("command", "")
-            desc = inp.get("description", "")
-            return f"{cmd}" + (f"  # {desc}" if desc else "")
-        if name == "Grep":
-            return f"{inp.get('pattern','')}" + (
-                f" in {inp.get('path','')}" if inp.get("path") else "")
-        if name == "Glob":
-            return inp.get("pattern", "")
-        if name.startswith("mcp__"):
-            return ", ".join(f"{k}={json.dumps(v) if not isinstance(v, str) else v!r}"
-                             for k, v in inp.items())
-        # Fallback: show whole input as JSON so nothing is hidden
-        return json.dumps(inp, ensure_ascii=False)
+    # ---- live session log moved to utils.claude_session ----------------
 
     # ---- archive + cleanup -----------------------------------------------
 
-    def _resolve_run_dir(self, clone: Path, instance_id: str) -> Path:
-        """Return the per-run directory that holds outputs for this run.
-
-        Recognized layouts:
-          ./work/<backend>/<id>/<ts>/repo   — current orchestrator
-          ./work/<id>/<ts>/repo             — older orchestrator (back-compat)
-
-        Walks up from `clone` looking for a parent named "work". Falls back
-        to <repo_root>/appmap_archives/<id>_<ts>/ for smoke runs whose
-        clones live elsewhere."""
-        run_dir = clone.parent
-        for ancestor in run_dir.parents:
-            if ancestor.name == "work":
-                return run_dir
-        ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fallback = ARCHIVES_DIR / f"{instance_id}_{ts}"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
-
-    def _archive_appmap_data(self, clone: Path, instance_id: str) -> None:
+    def _archive_appmap_data(self, clone: Path, instance_id: str, run_dir: Path) -> None:
         """Zip the clone's tmp/appmap/ into <run_dir>/appmap.zip."""
         appmap_dir = clone / "tmp" / "appmap"
         if not appmap_dir.exists() or not any(appmap_dir.iterdir()):
             print(f"  no appmap data to archive for {instance_id}", flush=True)
             return
-        run_dir = self._resolve_run_dir(clone, instance_id)
         archive_path = run_dir / "appmap.zip"
         base = str(archive_path)[:-4]  # make_archive re-adds .zip
         shutil.make_archive(base, "zip", root_dir=str(appmap_dir))
         print(f"  archived appmap data → {archive_path}", flush=True)
 
-    def _archive_session_logs(self, clone: Path, instance_id: str) -> None:
-        """Copy claude session JSONLs whose `cwd` matches this clone into
-        <run_dir>/sessions/. Claude appends to these files in real time
-        as it works, so they're the canonical work log."""
-        projects = Path.home() / ".claude" / "projects"
-        if not projects.is_dir():
-            return
-        needle = f'"cwd":"{clone}"'
-        target_root = self._resolve_run_dir(clone, instance_id) / "sessions"
-        copied: List[str] = []
-        for jsonl in projects.glob("*/*.jsonl"):
-            try:
-                # cwd is recorded near the top; cap the read to bound cost.
-                head = jsonl.read_text(errors="ignore")[:32768]
-            except Exception:
-                continue
-            if needle in head:
-                target_root.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(jsonl, target_root / jsonl.name)
-                copied.append(jsonl.name)
-        if copied:
-            print(f"  archived {len(copied)} session log(s) → {target_root}", flush=True)
-
-    def _flush_live_usage(self, src: Path, run_dir: Path) -> None:
-        """Write a usage.json snapshot from the in-flight session.jsonl.
-        Mirrors _compute_and_save_usage but reads a single live source file."""
-        per_model, first_ts, last_ts = self._aggregate_usage([src])
-        self._write_usage_json(per_model, first_ts, last_ts, run_dir,
-                               instance_id=run_dir.parent.name, partial=True)
-
-    def _compute_and_save_usage(self, clone: Path, instance_id: str) -> None:
-        """Aggregate per-message `usage` blocks from the archived session logs
-        and write <run_dir>/usage.json with token totals + estimated $ cost.
-
-        For comparing claude vs claude-appmap on the same instance the raw
-        token counts are the durable signal; cost is a snapshot of public
-        list pricing (see _PRICING_PER_MTOK)."""
-        run_dir = self._resolve_run_dir(clone, instance_id)
-        sessions_dir = run_dir / "sessions"
-        if not sessions_dir.is_dir():
-            return
-        per_model, first_ts, last_ts = self._aggregate_usage(
-            sorted(sessions_dir.glob("*.jsonl"))
-        )
-        self._write_usage_json(per_model, first_ts, last_ts, run_dir,
-                               instance_id=instance_id, partial=False)
-
-    @staticmethod
-    def _aggregate_usage(jsonls: List[Path]):
-        per_model: Dict[str, Dict[str, int]] = {}
-        first_ts: Optional[str] = None
-        last_ts: Optional[str] = None
-        for jsonl in jsonls:
-            try:
-                fh = jsonl.open(errors="ignore")
-            except Exception:
-                continue
-            with fh as f:
-                for line in f:
-                    try:
-                        d = json.loads(line)
-                    except Exception:
-                        continue
-                    ts = d.get("timestamp")
-                    if isinstance(ts, str):
-                        if first_ts is None or ts < first_ts:
-                            first_ts = ts
-                        if last_ts is None or ts > last_ts:
-                            last_ts = ts
-                    msg = d.get("message", {}) or {}
-                    if not isinstance(msg, dict):
-                        continue
-                    model = msg.get("model")
-                    usage = msg.get("usage")
-                    if not (model and isinstance(usage, dict)):
-                        continue
-                    bucket = per_model.setdefault(model, {
-                        "messages": 0,
-                        "input_tokens": 0,
-                        "cache_read_input_tokens": 0,
-                        "cache_creation_input_tokens": 0,
-                        "output_tokens": 0,
-                    })
-                    bucket["messages"] += 1
-                    for k in ("input_tokens", "cache_read_input_tokens",
-                              "cache_creation_input_tokens", "output_tokens"):
-                        v = usage.get(k, 0)
-                        if isinstance(v, int):
-                            bucket[k] += v
-        return per_model, first_ts, last_ts
-
-    def _write_usage_json(self, per_model, first_ts, last_ts, run_dir,
-                          instance_id, partial):
-        pricing = self._load_pricing()
-
-        models_out: Dict[str, Dict[str, object]] = {}
-        totals = {"input_tokens": 0, "cache_read_input_tokens": 0,
-                  "cache_creation_input_tokens": 0, "output_tokens": 0,
-                  "estimated_cost_usd": 0.0}
-        for model, b in per_model.items():
-            cost = self._estimate_cost(model, b, pricing)
-            models_out[model] = {**b, "estimated_cost_usd": round(cost, 6)}
-            for k in ("input_tokens", "cache_read_input_tokens",
-                      "cache_creation_input_tokens", "output_tokens"):
-                totals[k] += b[k]
-            totals["estimated_cost_usd"] += cost
-        totals["estimated_cost_usd"] = round(totals["estimated_cost_usd"], 6)
-
-        wall_seconds: Optional[float] = None
-        if first_ts and last_ts:
-            try:
-                wall_seconds = (datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
-                                - datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
-                                ).total_seconds()
-            except Exception:
-                pass
-
-        out = {
-            "instance_id": instance_id,
-            "partial": partial,
-            "first_timestamp": first_ts,
-            "last_timestamp": last_ts,
-            "wall_seconds": wall_seconds,
-            "models": models_out,
-            "totals": totals,
-            "pricing_source": ("env:APPMAP_PRICING_JSON" if os.environ.get("APPMAP_PRICING_JSON")
-                               else "builtin: see _PRICING_PER_MTOK"),
-        }
-        (run_dir / "usage.json").write_text(json.dumps(out, indent=2))
-        if not partial:
-            # Only print on the final flush so the live snapshots don't spam stdout.
-            print(
-                f"  usage: {totals['input_tokens']:,} in, "
-                f"{totals['output_tokens']:,} out, "
-                f"{totals['cache_read_input_tokens']:,} cache-read; "
-                f"~${totals['estimated_cost_usd']:.4f}",
-                flush=True,
-            )
-
-    @staticmethod
-    def _load_pricing() -> Dict[str, Dict[str, float]]:
-        override = os.environ.get("APPMAP_PRICING_JSON")
-        if override and Path(override).is_file():
-            try:
-                return json.loads(Path(override).read_text())
-            except Exception:
-                pass
-        return _PRICING_PER_MTOK
-
-    @staticmethod
-    def _estimate_cost(model: str, usage: Dict[str, int],
-                       pricing: Dict[str, Dict[str, float]]) -> float:
-        # Match by family prefix so e.g. claude-opus-4-7 falls under claude-opus-4.
-        rates = None
-        for family, r in pricing.items():
-            if model.startswith(family):
-                rates = r
-                break
-        if not rates:
-            return 0.0
-        per_tok = lambda key: rates.get(key, 0.0) / 1_000_000.0
-        cost = (
-            usage.get("input_tokens", 0)               * per_tok("input")
-            + usage.get("output_tokens", 0)            * per_tok("output")
-            + usage.get("cache_read_input_tokens", 0)  * per_tok("cache_read")
-            + usage.get("cache_creation_input_tokens", 0) * per_tok("cache_write")
-        )
-        return cost
 
     def _wipe_appmap_data(self, clone: Path) -> None:
         """Remove this run's appmap data and host index DB so the next run
