@@ -33,7 +33,7 @@ import subprocess
 import textwrap
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 APPMAP_CLI_JS = os.environ.get(
@@ -136,13 +136,18 @@ class ClaudeAppMapInterface:
             return _fail(str(e))
         finally:
             self._stop_watcher(watcher)
-            # Archive recordings out of the clone before it's removed by the
-            # orchestrator, then wipe the host index DB so the next instance
-            # starts clean.
+            # Archive recordings + claude session logs alongside the clone so
+            # the run is self-contained for analysis. Then wipe the host index
+            # DB for this run's SHA so ~/.appmap/data doesn't grow over 300
+            # instances.
             try:
                 self._archive_appmap_data(clone, instance_id)
             except Exception as e:
                 print(f"  warning: failed to archive appmap data: {e}", flush=True)
+            try:
+                self._archive_session_logs(clone, instance_id)
+            except Exception as e:
+                print(f"  warning: failed to archive session logs: {e}", flush=True)
             try:
                 self._wipe_appmap_data(clone)
             except Exception as e:
@@ -307,31 +312,57 @@ class ClaudeAppMapInterface:
 
     # ---- archive + cleanup -----------------------------------------------
 
-    def _archive_appmap_data(self, clone: Path, instance_id: str) -> None:
-        """Zip recordings + appmap.yml + watcher log into a sibling of the clone.
+    def _resolve_run_dir(self, clone: Path, instance_id: str) -> Path:
+        """Return the per-run directory that holds outputs for this run.
 
-        We assume the orchestrator placed the clone at ./work/<id>/<ts>/repo per
-        setup_repository's convention. The zip lands at ./work/<id>/<ts>/appmap.zip.
-        Falls back to <repo_root>/appmap_archives/<id>_<ts>.zip when the clone
-        isn't under a recognizable work dir."""
+        When the orchestrator has placed the clone at ./work/<id>/<ts>/repo,
+        return ./work/<id>/<ts>. Otherwise fall back to a fresh
+        <repo_root>/appmap_archives/<id>_<ts>/ so smoke runs (whose clones
+        live elsewhere) still get a stable archive location."""
+        work_dir = clone.parent  # ./work/<id>/<ts>/
+        if work_dir.name and work_dir.parent.name == instance_id and \
+           work_dir.parent.parent.name == "work":
+            return work_dir
+        ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fallback = ARCHIVES_DIR / f"{instance_id}_{ts}"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+    def _archive_appmap_data(self, clone: Path, instance_id: str) -> None:
+        """Zip the clone's tmp/appmap/ into <run_dir>/appmap.zip."""
         appmap_dir = clone / "tmp" / "appmap"
         if not appmap_dir.exists() or not any(appmap_dir.iterdir()):
             print(f"  no appmap data to archive for {instance_id}", flush=True)
             return
-
-        # Prefer the work-dir convention so the zip travels with the run.
-        work_dir = clone.parent  # ./work/<id>/<ts>/
-        if work_dir.name and work_dir.parent.name == instance_id and \
-           work_dir.parent.parent.name == "work":
-            archive_path = work_dir / "appmap.zip"
-        else:
-            ARCHIVES_DIR.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive_path = ARCHIVES_DIR / f"{instance_id}_{ts}.zip"
-
-        base = str(archive_path)[:-4]  # strip ".zip"; make_archive re-adds it
+        run_dir = self._resolve_run_dir(clone, instance_id)
+        archive_path = run_dir / "appmap.zip"
+        base = str(archive_path)[:-4]  # make_archive re-adds .zip
         shutil.make_archive(base, "zip", root_dir=str(appmap_dir))
         print(f"  archived appmap data → {archive_path}", flush=True)
+
+    def _archive_session_logs(self, clone: Path, instance_id: str) -> None:
+        """Copy claude session JSONLs whose `cwd` matches this clone into
+        <run_dir>/sessions/. Claude appends to these files in real time
+        as it works, so they're the canonical work log."""
+        projects = Path.home() / ".claude" / "projects"
+        if not projects.is_dir():
+            return
+        needle = f'"cwd":"{clone}"'
+        target_root = self._resolve_run_dir(clone, instance_id) / "sessions"
+        copied: List[str] = []
+        for jsonl in projects.glob("*/*.jsonl"):
+            try:
+                # cwd is recorded near the top; cap the read to bound cost.
+                head = jsonl.read_text(errors="ignore")[:32768]
+            except Exception:
+                continue
+            if needle in head:
+                target_root.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(jsonl, target_root / jsonl.name)
+                copied.append(jsonl.name)
+        if copied:
+            print(f"  archived {len(copied)} session log(s) → {target_root}", flush=True)
 
     def _wipe_appmap_data(self, clone: Path) -> None:
         """Remove this run's appmap data and host index DB so the next run
