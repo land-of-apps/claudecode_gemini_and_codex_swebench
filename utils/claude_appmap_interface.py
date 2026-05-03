@@ -432,7 +432,13 @@ class ClaudeAppMapInterface:
 
     @staticmethod
     def _format_session_line(line: str) -> Optional[str]:
-        """Turn one JSONL record into 0+ human-readable lines (joined by \\n)."""
+        """Turn one JSONL record into 0+ human-readable lines.
+
+        No content is truncated — session.jsonl already has the raw form, but
+        this view should also preserve everything for readability without
+        forcing the user to re-parse JSON. Multi-line tool inputs / results
+        are wrapped with a continuation indent so the "one event per stanza"
+        rhythm survives."""
         try:
             d = json.loads(line)
         except Exception:
@@ -443,8 +449,12 @@ class ClaudeAppMapInterface:
             return None
         content = msg.get("content")
         if isinstance(content, str):
-            text = content[:200].replace("\n", " ").strip()
-            return f"[{ts}] {msg.get('role','?').upper()}: {text}" if text else None
+            text = content.strip()
+            if not text:
+                return None
+            return ClaudeAppMapInterface._wrap_lines(
+                f"[{ts}] {msg.get('role','?').upper()}: ", text
+            )
         if not isinstance(content, list):
             return None
         out: List[str] = []
@@ -455,35 +465,63 @@ class ClaudeAppMapInterface:
             if t == "tool_use":
                 name = c.get("name", "?")
                 summary = ClaudeAppMapInterface._summarize_tool_input(name, c.get("input", {}))
-                out.append(f"[{ts}] → {name}({summary})")
+                out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}] → {name}(", summary, suffix=")"))
             elif t == "text":
-                text = (c.get("text") or "").strip().replace("\n", " ")
+                text = (c.get("text") or "").strip()
                 if text:
-                    out.append(f"[{ts}]   {text[:300]}")
+                    out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}]   ", text))
             elif t == "tool_result":
                 o = c.get("content", "")
                 if isinstance(o, list):
                     o = (o[0] or {}).get("text", "") if o else ""
-                o = str(o)[:160].replace("\n", " ").strip()
+                o = str(o).strip()
                 if o:
-                    out.append(f"[{ts}]   ← {o}")
+                    out.append(ClaudeAppMapInterface._wrap_lines(f"[{ts}]   ← ", o))
         return "\n".join(out) if out else None
 
     @staticmethod
+    def _wrap_lines(prefix: str, body: str, suffix: str = "") -> str:
+        """Emit body under prefix, prepending a continuation indent on
+        subsequent lines so the timestamp column stays aligned."""
+        lines = body.splitlines() or [""]
+        indent = " " * len(prefix)
+        first = prefix + lines[0]
+        if len(lines) == 1:
+            return first + suffix
+        rest = [indent + line for line in lines[1:]]
+        if suffix:
+            rest[-1] = rest[-1] + suffix
+        return "\n".join([first, *rest])
+
+    @staticmethod
     def _summarize_tool_input(name: str, inp: Dict) -> str:
+        """Pick the most informative field for a tool call. Returns full
+        content (no truncation) — the wrapper handles multi-line layout."""
         if not isinstance(inp, dict):
             return ""
         if name in ("Read", "Edit", "Write"):
-            return inp.get("file_path", "")
+            base = inp.get("file_path", "")
+            extras = []
+            for k in ("offset", "limit", "old_string", "new_string", "content"):
+                v = inp.get(k)
+                if v is not None:
+                    extras.append(f"{k}={v!r}" if isinstance(v, (int, str)) and len(str(v)) < 60
+                                  else f"{k}=<{len(str(v))} chars>")
+            return base + (" " + ", ".join(extras) if extras else "")
         if name == "Bash":
-            return (inp.get("command", "")[:120]).replace("\n", " ")
+            cmd = inp.get("command", "")
+            desc = inp.get("description", "")
+            return f"{cmd}" + (f"  # {desc}" if desc else "")
         if name == "Grep":
-            return inp.get("pattern", "")[:80]
+            return f"{inp.get('pattern','')}" + (
+                f" in {inp.get('path','')}" if inp.get("path") else "")
         if name == "Glob":
             return inp.get("pattern", "")
         if name.startswith("mcp__"):
-            return ", ".join(f"{k}={v}" for k, v in list(inp.items())[:3])
-        return ", ".join(list(inp.keys()))[:80]
+            return ", ".join(f"{k}={json.dumps(v) if not isinstance(v, str) else v!r}"
+                             for k, v in inp.items())
+        # Fallback: show whole input as JSON so nothing is hidden
+        return json.dumps(inp, ensure_ascii=False)
 
     # ---- archive + cleanup -----------------------------------------------
 
