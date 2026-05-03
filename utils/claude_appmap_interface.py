@@ -216,7 +216,7 @@ class ClaudeAppMapInterface:
     def _write_workspace_files(self, clone: Path, instance: Dict) -> None:
         (clone / "appmap.yml").write_text(self._appmap_yml(instance))
         (clone / ".mcp.json").write_text(self._mcp_json())
-        (clone / "issue.md").write_text(instance.get("problem_statement", ""))
+        (clone / "issue.md").write_text(self._issue_md(instance))
         (clone / "CLAUDE.md").write_text(self._claude_md())
         (clone / "tmp" / "appmap").mkdir(parents=True, exist_ok=True)
         bin_dir = clone / "bin"
@@ -226,6 +226,17 @@ class ClaudeAppMapInterface:
         script.chmod(0o755)
         self._gitignore_appmap_artifacts(clone)
         self._commit_scaffolding(clone)
+
+    @staticmethod
+    def _issue_md(instance: Dict) -> str:
+        """Mirror the vanilla SWE-bench prompt: problem statement, then any
+        `hints_text`. The vanilla `claude` backend (via PromptFormatter)
+        gets both; we must too, or the comparison is unfair."""
+        body = instance.get("problem_statement", "") or ""
+        hints = instance.get("hints_text", "") or ""
+        if hints.strip():
+            body = body.rstrip() + "\n\nHints:\n" + hints
+        return body
 
     @staticmethod
     def _claude_md() -> str:
