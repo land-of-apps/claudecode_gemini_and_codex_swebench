@@ -240,6 +240,43 @@ class ClaudeAppMapInterface:
         script = bin_dir / "record-appmap.sh"
         script.write_text(self._record_script(instance))
         script.chmod(0o755)
+        self._gitignore_appmap_artifacts(clone)
+        self._commit_scaffolding(clone)
+
+    @staticmethod
+    def _gitignore_appmap_artifacts(clone: Path) -> None:
+        """Append claude-appmap's runtime artifacts to .gitignore so the
+        agent's actual code edits are the only thing in `git diff HEAD`."""
+        marker = "# claude-appmap"
+        addition = (
+            f"\n{marker} runtime artifacts\n"
+            "/tmp/appmap/\n"
+            "/tmp/appmap-watch.log\n"
+        )
+        gi = clone / ".gitignore"
+        existing = gi.read_text() if gi.exists() else ""
+        if marker not in existing:
+            gi.write_text(existing + addition)
+
+    @staticmethod
+    def _commit_scaffolding(clone: Path) -> None:
+        """Commit appmap.yml/.mcp.json/issue.md/bin/record-appmap.sh/.gitignore
+        as a new HEAD. patch_extractor.py uses `git diff HEAD`, so anything
+        already in HEAD won't appear in the predicted patch."""
+        env = {**os.environ,
+               "GIT_AUTHOR_NAME": "claude-appmap",
+               "GIT_AUTHOR_EMAIL": "appmap@example.invalid",
+               "GIT_COMMITTER_NAME": "claude-appmap",
+               "GIT_COMMITTER_EMAIL": "appmap@example.invalid"}
+        subprocess.run(
+            ["git", "add", "-A", "appmap.yml", ".mcp.json", "issue.md",
+             "bin/record-appmap.sh", ".gitignore"],
+            cwd=str(clone), env=env, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "commit", "--no-verify", "-m", "claude-appmap: scaffolding"],
+            cwd=str(clone), env=env, capture_output=True,
+        )
 
     @staticmethod
     def _appmap_yml(instance: Dict) -> str:

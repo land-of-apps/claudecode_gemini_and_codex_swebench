@@ -15,3 +15,12 @@ container with `appmap-python` instrumentation enabled. Do not invoke
 `pytest` directly — the host has no Python environment for this project.
 Recordings will appear under `tmp/appmap/`; a host-side watcher
 indexes them automatically so the AppMap MCP tools see them within seconds.
+
+This is a fully autonomous run. Do NOT end your turn until you have:
+  (1) produced at least one AppMap recording for the bug,
+  (2) inspected the recording(s) via the AppMap MCP, and
+  (3) edited the project's source code to fix the bug.
+
+Keep working through the 5-step loop without pausing for user input.
+The session ends only when a fix is in place; do not stop after
+configuring `appmap.yml` or after placing labels.
