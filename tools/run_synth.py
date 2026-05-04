@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,32 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _fast_copy(src: Path, dst: Path) -> None:
+    """Clone `src` tree → `dst` using APFS clonefile when available.
+
+    On APFS volumes, `cp -c` triggers clonefile(2) which copy-on-writes
+    metadata only — orders of magnitude faster than walking and copying
+    every file. Falls back to shutil.copytree for non-Darwin or when
+    src/dst are on different volumes (clonefile errors out).
+
+    `dst` must not exist; `dst.parent` is created if necessary.
+    """
+    src = Path(src)
+    dst = Path(dst)
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    if platform.system() == "Darwin":
+        try:
+            subprocess.run(["cp", "-c", "-a", str(src), str(dst)],
+                           check=True, capture_output=True)
+            return
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+    shutil.copytree(src, dst, symlinks=True)
 
 
 def discover_docker_host() -> str | None:
@@ -92,7 +119,9 @@ def main():
     repo_dir = run_dir / "repo"
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"copying bugged clone → {repo_dir}", flush=True)
-    shutil.copytree(bugged, repo_dir, symlinks=True, dirs_exist_ok=True)
+    _t0 = time.time()
+    _fast_copy(bugged, repo_dir)
+    print(f"  copy took {time.time() - _t0:.2f}s", flush=True)
 
     # Resolve model alias.
     from utils.model_registry import get_model_name
