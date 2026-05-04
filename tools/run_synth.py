@@ -91,7 +91,7 @@ def main():
     repo_dir = run_dir / "repo"
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"copying bugged clone → {repo_dir}", flush=True)
-    shutil.copytree(bugged, repo_dir, symlinks=True)
+    shutil.copytree(bugged, repo_dir, symlinks=True, dirs_exist_ok=True)
 
     # Resolve model alias.
     from utils.model_registry import get_model_name
