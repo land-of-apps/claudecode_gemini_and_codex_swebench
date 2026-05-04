@@ -31,6 +31,15 @@ Phase breakdown:
 - 3-step att.1:   RCA $7.51 / fix $4.14 / verify $4.56  (failed)
 - 3-step att.2:   RCA $9.78 / fix $8.29 / verify $3.03
 
+## Headline reading
+
+The moderate win for 3-step. Both architectures pass; 3-step is ~29%
+cheaper ($21 vs $30) and produces a cleaner patch (2 files vs 3).
+Vanilla over-fixes, going broader through `partner/strategy.py` and
+`templatetags/purchase_info_tags.py` — additional layers it tried to
+optimize. Both pass the scaling-bound test, but the 3-step patch is
+more surgical.
+
 ## Observations
 
 - **Both architectures identified the right root-cause file.** Vanilla
