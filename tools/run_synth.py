@@ -123,6 +123,7 @@ def main():
                 -w {_shlex.quote(mount_path)} \\
                 -e DATABASE_ENGINE=django.db.backends.sqlite3 \\
                 -e DATABASE_NAME=:memory: \\
+                -e PYTHONPATH={_shlex.quote(mount_path)}/src \\
                 {_shlex.quote(image)} \\
                 bash -lc {_shlex.quote(inner)} _wrap "$@"
             """)
@@ -228,6 +229,11 @@ def main():
         "-v", f"{repo_dir}:{mount_path}", "-w", mount_path,
         "-e", "DATABASE_ENGINE=django.db.backends.sqlite3",
         "-e", "DATABASE_NAME=:memory:",
+        # The image bakes in `pip install -e /tmp/repo` so without an
+        # override Python imports oscar from /tmp/repo (frozen) instead
+        # of /app/src (the agent's edits). Front-load /app/src on
+        # PYTHONPATH so the mounted source wins.
+        "-e", f"PYTHONPATH={mount_path}/src",
         fx["instance_image"],
         "bash", "-lc",
         setup_script + "\n" + test_cmd + " 2>&1 | tail -15"
