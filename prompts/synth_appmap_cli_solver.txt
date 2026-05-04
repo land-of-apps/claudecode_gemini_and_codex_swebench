@@ -75,8 +75,16 @@ Concretely, do one of these:
   the process recorder captures the call tree.
 
 Either way, you reproduce the flow, recordings appear under
-`tmp/appmap/`, and you investigate from there. The principles below
-apply throughout:
+`tmp/appmap/`, and you investigate from there.
+
+**Only the bug-exhibiting actions go under recording.** Setup work
+that doesn't pertain to the bug — schema migrations, seed data,
+factory fixture creation, server warm-up — should run via
+`bin/run-tests.sh` (no instrumentation) so the recording stays
+focused on the failing call path. Switch to `bin/record-appmap.sh`
+only for the actual bug-triggering steps.
+
+The principles below apply throughout:
 
 - **Start with a MINIMAL `appmap.yml`** — no `packages:` section.
   Built-in instrumentation (HTTP, SQL, exceptions, canonical labels)
