@@ -98,3 +98,8 @@ venv
 /work/
 /appmap_archives/
 /appmap.yml
+
+# SWE-bench harness output dropped at repo root by run_evaluation
+/*.json
+!/package*.json
+/logs/run_evaluation/
