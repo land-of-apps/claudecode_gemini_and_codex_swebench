@@ -1,11 +1,17 @@
 {
-  "bugged_clone": "/Users/kgilpin/tmp/synth_oscar_4016",
+  "_format_version": 2,
+  "_format_notes": "v2: clean_upstream + bug_patch + verify_patch (declarative, agent's repo has no bug history). v1 used bugged_clone (deprecated).",
+
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_4016_clean",
+  "bug_patch": "synth_bugs/oscar_4016/bug.patch",
+  "verify_patch": "synth_bugs/oscar_4016/verify.patch",
+
   "instance_image": "synth-oscar-test:latest",
   "container_mount": "/app",
   "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
-  "verify_test_src": "synth_bugs/oscar_4016/verify_test.py",
-  "verify_test_dst": "tests/integration/basket/test_synth_verify.py",
+
   "verify_test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
   "fix_files": ["src/oscar/apps/basket/utils.py"],
-  "bug_summary": "OfferApplications.available() exclusivity check uses 'a.id < offer.id' instead of 'a.id != offer.id'; same-priority exclusive offers can both apply when added in the right order. Caught by gold test from PR #4095."
+
+  "bug_summary": "LineOfferConsumer.available() exclusivity check uses 'a.priority == offer.priority and a.id < offer.id' (asymmetric); two equal-priority exclusive offers can both apply when added in id-descending order. Caught by gold test from django-oscar PR #4095."
 }

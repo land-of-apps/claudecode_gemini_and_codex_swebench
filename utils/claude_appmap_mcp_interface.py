@@ -73,48 +73,37 @@ class ClaudeAppMapMcpInterface:
         except FileNotFoundError:
             raise RuntimeError(f"{cmd} not found in PATH")
 
-    # ---- public entrypoint ----------------------------------------------
+    # ---- public entrypoints ---------------------------------------------
 
-    def execute_code_cli(
-        self,
-        prompt: str,                         # ignored: this backend builds its own
-        cwd: str,                            # host clone dir
-        model: Optional[str] = None,
-        instance: Optional[Dict] = None,     # required; see wiring TODO
-    ) -> Dict[str, object]:
-        if instance is None:
-            return _fail("claude-appmap requires the SWE-bench instance dict")
+    def prepare_workspace(self, clone: Path, instance: Dict) -> None:
+        """Pull the instance image, write all backend-specific scaffolding
+        files into the clone, and seed the AppMap index. Does NOT commit
+        anything to git — the v2 caller (run_synth) does that itself
+        once it has both the bug-applied source and our scaffolding in
+        the working tree.
 
-        clone = Path(cwd).resolve()
+        After this returns, the clone has:
+          appmap.yml, .mcp.json, issue.md, CLAUDE.md, tmp/appmap/,
+          bin/{record-appmap,run-tests}.sh, .gitignore
+        ...but no commits — the dir may not even be a git repo yet.
+        """
+        self._ensure_instance_image(instance)
+        self._write_workspace_files(clone, instance)
+        self._index_sha = self._seed_index(clone)
+
+    def run_claude(self, clone: Path, model: Optional[str],
+                    instance: Dict) -> Dict[str, object]:
+        """Run claude against an already-prepared clone. Manages AppMap
+        watcher lifecycle, session live-log mirroring, and post-run
+        archive/cleanup. Returns the standard {success, stdout, stderr,
+        returncode} dict.
+        """
         instance_id = instance.get("instance_id", "unknown")
-        # podman on macOS only shares specific host dirs (typically /Users) into
-        # its VM. /var/folders (the default tempfile.gettempdir() result) is NOT
-        # shared, so bind mounts of paths there silently fail with statfs errors.
-        if not str(clone).startswith(str(Path.home())):
-            return _fail(
-                f"clone {clone} is outside $HOME — podman cannot bind-mount it. "
-                "Set TMPDIR or SMOKE_CLONE_DIR to a path under your home directory."
-            )
-
-        self._index_sha: Optional[str] = None
-        try:
-            self._ensure_instance_image(instance)         # pre-build sweb.eval.* image
-            self._write_workspace_files(clone, instance)
-            self._index_sha = self._seed_index(clone)     # create empty query.db, capture sha
-        except Exception as e:
-            return _fail(f"setup failed: {e}")
-
-        # Hoist run_dir up-front so the live-log thread can write into it.
         run_dir = claude_session.resolve_run_dir(clone, instance_id)
         run_dir.mkdir(parents=True, exist_ok=True)
 
-        # Pinning the session id makes the source JSONL deterministically
-        # findable; the shared live-log thread then symlinks it into run_dir
-        # so session.jsonl reflects the agent's writes in real time, and
-        # console.log carries a human-readable per-step stream.
         session_id = str(uuid.uuid4())
         live_stop = claude_session.start_live_log(session_id, run_dir)
-
         watcher = self._start_watcher(clone)
         try:
             cmd = ["claude",
@@ -145,10 +134,6 @@ class ClaudeAppMapMcpInterface:
         finally:
             self._stop_watcher(watcher)
             live_stop.set()
-            # Archive recordings + claude session logs alongside the clone so
-            # the run is self-contained for analysis. Then wipe the host index
-            # DB for this run's SHA so ~/.appmap/data doesn't grow over 300
-            # instances.
             try:
                 self._archive_appmap_data(clone, instance_id, run_dir)
             except Exception as e:
@@ -165,6 +150,40 @@ class ClaudeAppMapMcpInterface:
                 self._wipe_appmap_data(clone)
             except Exception as e:
                 print(f"  warning: failed to wipe appmap data: {e}", flush=True)
+
+    def execute_code_cli(
+        self,
+        prompt: str,                         # ignored: this backend builds its own
+        cwd: str,                            # host clone dir
+        model: Optional[str] = None,
+        instance: Optional[Dict] = None,
+    ) -> Dict[str, object]:
+        """Legacy entry point (v1 fixture flow): prepare workspace, commit
+        scaffolding to git, then run claude. New v2 flow (run_synth +
+        clean_upstream) calls `prepare_workspace` and `run_claude`
+        directly so it can git-init the whole tree at once.
+        """
+        if instance is None:
+            return _fail("claude-appmap requires the SWE-bench instance dict")
+
+        clone = Path(cwd).resolve()
+        # podman on macOS only shares specific host dirs (typically /Users) into
+        # its VM. /var/folders (the default tempfile.gettempdir() result) is NOT
+        # shared, so bind mounts of paths there silently fail with statfs errors.
+        if not str(clone).startswith(str(Path.home())):
+            return _fail(
+                f"clone {clone} is outside $HOME — podman cannot bind-mount it. "
+                "Set TMPDIR or SMOKE_CLONE_DIR to a path under your home directory."
+            )
+
+        self._index_sha: Optional[str] = None
+        try:
+            self.prepare_workspace(clone, instance)
+            self._commit_scaffolding(clone)
+        except Exception as e:
+            return _fail(f"setup failed: {e}")
+
+        return self.run_claude(clone, model, instance)
 
     # ---- per-instance setup ---------------------------------------------
 
@@ -214,6 +233,13 @@ class ClaudeAppMapMcpInterface:
         return None
 
     def _write_workspace_files(self, clone: Path, instance: Dict) -> None:
+        """Write scaffolding files into clone. Does NOT commit them.
+
+        The legacy entry point (`execute_code_cli` against a v1 fixture)
+        finishes the scaffolding by calling `_commit_scaffolding`. The
+        v2 entry point (run_synth + clean_upstream + bug_patch) lets
+        run_synth git-init the whole tree at once after this returns.
+        """
         (clone / "appmap.yml").write_text(self._appmap_yml(instance))
         (clone / ".mcp.json").write_text(self._mcp_json())
         (clone / "issue.md").write_text(self._issue_md(instance))
@@ -228,7 +254,6 @@ class ClaudeAppMapMcpInterface:
         runt.write_text(self._run_tests_script(instance))
         runt.chmod(0o755)
         self._gitignore_appmap_artifacts(clone)
-        self._commit_scaffolding(clone)
 
     def _run_tests_script(self, instance: Dict) -> str:
         """Same container shape as record-appmap.sh, no appmap-python wrap."""

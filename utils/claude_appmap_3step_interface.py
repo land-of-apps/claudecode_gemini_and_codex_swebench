@@ -68,11 +68,15 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
         model: Optional[str] = None,
         instance: Optional[Dict] = None,
     ) -> Dict[str, object]:
+        """Legacy entry point (v1 fixture flow): prepare workspace, commit
+        scaffolding to git, then run the 3-step loop. New v2 flow calls
+        `prepare_workspace` and `run_claude` directly so it can git-init
+        the whole tree at once.
+        """
         if instance is None:
             return _fail("3-step backend requires the SWE-bench instance dict")
 
         clone = Path(cwd).resolve()
-        instance_id = instance.get("instance_id", "unknown")
         if not str(clone).startswith(str(Path.home())):
             return _fail(
                 f"clone {clone} is outside $HOME — podman cannot bind-mount it. "
@@ -81,13 +85,27 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
 
         self._index_sha: Optional[str] = None
         try:
-            self._ensure_instance_image(instance)
-            self._write_workspace_files(clone, instance)
-            self._write_agent_definitions(clone)
-            self._index_sha = self._seed_index(clone)
+            self.prepare_workspace(clone, instance)
+            self._commit_scaffolding(clone)
         except Exception as e:
             return _fail(f"setup failed: {e}")
 
+        return self.run_claude(clone, model, instance)
+
+    def prepare_workspace(self, clone: Path, instance: Dict) -> None:
+        """Extends the MCP interface's prepare to also drop the
+        appmap-rca and appmap-verify subagent definitions into
+        `<clone>/.claude/agents/`."""
+        super().prepare_workspace(clone, instance)
+        self._write_agent_definitions(clone)
+
+    def run_claude(self, clone: Path, model: Optional[str],
+                    instance: Dict) -> Dict[str, object]:
+        """Run the 3-step loop against an already-prepared clone.
+        Manages AppMap watcher lifecycle and post-run archive/cleanup
+        across all three steps.
+        """
+        instance_id = instance.get("instance_id", "unknown")
         run_dir = claude_session.resolve_run_dir(clone, instance_id)
         run_dir.mkdir(parents=True, exist_ok=True)
 

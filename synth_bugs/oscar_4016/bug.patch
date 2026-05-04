@@ -1,0 +1,21 @@
+--- a/src/oscar/apps/basket/utils.py
++++ b/src/oscar/apps/basket/utils.py
+@@ -161,12 +161,12 @@
+             if offer.exclusive:
+                 for a in applied:
+                     if a.exclusive:
+-                        if a.priority >= offer.priority:
+-                            # Exclusive offers cannot be applied if any other
+-                            # exclusive offer of equal-or-higher priority is
+-                            # active already. Equal-priority ties are resolved
+-                            # by application order: whichever offer the
+-                            # Applicator processed first holds its claim.
++                        if any([
++                            a.priority > offer.priority,
++                            a.priority == offer.priority and a.id < offer.id
++                        ]):
++                            # Exclusive offers cannot be applied if any other exclusive
++                            # offer with higher priority is active already.
+                             max_affected_items = max_affected_items - self.consumed(a)
+                             if max_affected_items == 0:
+                                 return 0
