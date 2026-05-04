@@ -100,6 +100,26 @@ def main():
     # commit so PatchExtractor's filter (drop files not in base) keeps the
     # agent's edits to django/* and to our planted test file.
     bugged = Path(fx["bugged_clone"]).expanduser().resolve()
+
+    # Sanity check: bugged_clone must be a clean checkout. APFS clonefile
+    # copies the working tree wholesale — any untracked or modified files
+    # here leak into every run. The most damaging leak we've seen is
+    # `tests/integration/basket/test_synth_verify.py` (the hidden verify
+    # test the harness copies in post-patch); if it's already in the
+    # bugged_clone the agent reads it during diagnosis and effectively
+    # tests against the spec. Fail loud rather than contaminate a run.
+    bugged_status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=bugged, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    if bugged_status:
+        print(f"\nbugged_clone {bugged} is not clean:\n{bugged_status}",
+              file=sys.stderr)
+        print("\nClean it before running:", file=sys.stderr)
+        print(f"  git -C {bugged} clean -fdx && "
+              f"git -C {bugged} checkout -- .", file=sys.stderr)
+        sys.exit(2)
+
     base_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=bugged, text=True).strip()
     instance = {
