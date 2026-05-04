@@ -1,0 +1,16 @@
+{
+  "fixture_id": "oscar_4016",
+  "backend": "claude-appmap-mcp",
+  "model": "claude-opus-4-7",
+  "test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
+  "test_output_tail": "/usr/local/lib/python3.10/dist-packages/sorl/thumbnail/fields.py:43: RemovedInDjango40Warning: django.utils.translation.ugettext_lazy() is deprecated in favor of django.utils.translation.gettext_lazy().\n  'invalid_image': _(\"Upload a valid image. The file you uploaded was \"\n/usr/local/lib/python3.10/dist-packages/sorl/thumbnail/conf/__init__.py:16: RemovedInDjango40Warning: The PASSWORD_RESET_TIMEOUT_DAYS setting is deprecated. Use PASSWORD_RESET_TIMEOUT instead.\n  setattr(self, attr, getattr(obj, attr))\n============================= test session starts ==============================\nplatform linux -- Python 3.10.12, pytest-9.0.3, pluggy-1.6.0 -- /usr/bin/python\ncachedir: .pytest_cache\nrootdir: /app\nconfigfile: setup.cfg\nplugins: anyio-4.13.0, appmap-2.2.0, django-webtest-1.9.14, Faker-40.15.0, django-3.8.0, forked-1.6.0, xdist-2.5.0\ncollecting ... collected 1 item\n\ntests/integration/basket/test_synth_verify.py::test_apply_multiple_vouchers PASSED [100%]\n\n============================== 1 passed in 3.96s ===============================\n",
+  "test_passed": true,
+  "patch_chars": 1853,
+  "patch_files_touched": [
+    "src/oscar/apps/basket/utils.py"
+  ],
+  "expected_fix_files": [
+    "src/oscar/apps/basket/utils.py"
+  ],
+  "fixed_correct_file": true
+}

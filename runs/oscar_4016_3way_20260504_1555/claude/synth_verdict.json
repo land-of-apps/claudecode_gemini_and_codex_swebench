@@ -1,0 +1,17 @@
+{
+  "fixture_id": "oscar_4016",
+  "backend": "claude",
+  "model": "claude-opus-4-7",
+  "test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
+  "test_output_tail": "\n=================================== FAILURES ===================================\n_________________________ test_apply_multiple_vouchers _________________________\ntests/integration/basket/test_synth_verify.py:52: in test_apply_multiple_vouchers\n    assert len(filled_basket.offer_applications) == 1\nE   assert 2 == 1\nE    +  where 2 = len(<oscar.apps.offer.results.OfferApplications object at 0xffffb3a32500>)\nE    +    where <oscar.apps.offer.results.OfferApplications object at 0xffffb3a32500> = <Basket: Open basket (owner: None, lines: 2)>.offer_applications\n---------------------------- Captured stderr setup -----------------------------\nCreating test database for alias 'default'...\n--------------------------- Captured stderr teardown ---------------------------\nDestroying test database for alias 'default'...\n=========================== short test summary info ============================\nFAILED tests/integration/basket/test_synth_verify.py::test_apply_multiple_vouchers\n============================== 1 failed in 4.02s ===============================\n",
+  "test_passed": false,
+  "patch_chars": 4298,
+  "patch_files_touched": [
+    "src/oscar/apps/offer/applicator.py",
+    "tests/integration/offer/test_priority_offers.py"
+  ],
+  "expected_fix_files": [
+    "src/oscar/apps/basket/utils.py"
+  ],
+  "fixed_correct_file": false
+}
