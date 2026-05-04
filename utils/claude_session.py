@@ -210,6 +210,48 @@ def _summarize_tool_input(name: str, inp: Dict) -> str:
 
 # ---------- session log archiving ----------
 
+def extract_subagent_report(session_jsonl: Path,
+                             marker_strings: Optional[List[str]] = None) -> str:
+    """Pull a subagent's final text report out of the parent session JSONL.
+
+    The Agent tool's tool_result has a content array; the first text block
+    is the subagent's last message — that's the report. Trims off the
+    auto-appended ``agentId: <hex>`` / ``<usage>...`` metadata block.
+
+    `marker_strings` is a list of substrings; at least one must appear in
+    the report for it to be accepted (e.g. ``["## Root cause", "## Verdict"]``).
+    Defaults to no constraint (returns the first plausible report).
+    """
+    src = session_jsonl
+    if not src.exists():
+        src = src.resolve()
+    with src.open() as f:
+        for line in f:
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("type") != "user":
+                continue
+            for item in rec.get("message", {}).get("content", []) or []:
+                if not isinstance(item, dict) or item.get("type") != "tool_result":
+                    continue
+                content = item.get("content")
+                if not isinstance(content, list):
+                    continue
+                texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+                if not texts:
+                    continue
+                report = texts[0]
+                if "agentId:" in report:
+                    report = report.split("agentId:")[0].rstrip()
+                if marker_strings:
+                    if not any(m in report for m in marker_strings):
+                        continue
+                return report
+    raise RuntimeError(f"could not find subagent report in {session_jsonl}")
+
+
 def archive_session_logs(clone: Path, run_dir: Path) -> None:
     """Copy claude session JSONLs whose `cwd` matches this clone into
     <run_dir>/sessions/. Belt-and-suspenders for the live symlink: if
