@@ -50,7 +50,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("fixture_id")
     ap.add_argument("--backend",
-                    choices=["claude", "claude-appmap-mcp", "claude-appmap-cli"],
+                    choices=["claude", "claude-appmap-mcp",
+                             "claude-appmap-3step"],
                     required=True)
     ap.add_argument("--model", default="opus-4.7")
     args = ap.parse_args()
@@ -129,16 +130,18 @@ def main():
     # Compose the agent prompt for this backend.
     base_prompt = (REPO_ROOT / "prompts" / "synth_base_solver.txt").read_text()
     appmap_prompt = (REPO_ROOT / "prompts" / "synth_appmap_mcp_solver.txt").read_text()
-    appmap_cli_prompt = (REPO_ROOT / "prompts" / "synth_appmap_cli_solver.txt").read_text()
 
     # Pick the interface.
-    if args.backend in ("claude-appmap-mcp", "claude-appmap-cli"):
+    if args.backend in ("claude-appmap-mcp", "claude-appmap-3step"):
         if args.backend == "claude-appmap-mcp":
             from utils.claude_appmap_mcp_interface import ClaudeAppMapMcpInterface as _AppMapIface
             backend_prompt = appmap_prompt
         else:
-            from utils.claude_appmap_cli_interface import ClaudeAppMapCliInterface as _AppMapIface
-            backend_prompt = appmap_cli_prompt
+            # claude-appmap-3step builds its own per-step prompts; the
+            # base prompt here is unused (interface ignores _prompt for
+            # the 3-step flow), but we set something for diagnostic logs.
+            from utils.claude_appmap_3step_interface import ClaudeAppMap3StepInterface as _AppMapIface
+            backend_prompt = "(3-step backend builds its own prompts per step)"
 
         iface = _AppMapIface()
         iface._test_spec = type("S", (), {"instance_image_key": image})()
