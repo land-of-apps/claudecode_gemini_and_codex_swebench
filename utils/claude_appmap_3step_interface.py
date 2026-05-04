@@ -137,7 +137,11 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
             try:
                 rca_report = claude_session.extract_subagent_report(
                     step1_dir / "session.jsonl",
-                    marker_strings=["## Root cause", "## Evidence"],
+                    # Match either path: full RCA has "## Root cause";
+                    # triage-only has "## Suspected location". Either
+                    # marker is preceded by `report_type: ...` on line 1.
+                    marker_strings=["## Root cause", "## Suspected location",
+                                    "report_type:"],
                 )
                 (run_dir / "rca_report.md").write_text(rca_report)
                 print(f"    rca report: {len(rca_report):,} chars", flush=True)
@@ -313,6 +317,50 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
 
     def _step2_prompt(self, rca_report: str, instance: Dict) -> str:
         issue = self._issue_md(instance).strip()
+        is_triage = self._is_triage_report(rca_report)
+
+        if is_triage:
+            instructions = textwrap.dedent("""\
+                ## What to do
+
+                The RCA subagent took the **triage-only path** — it did
+                NOT record or verify with AppMap. The "Suspected
+                location" below is a hint based on the bug report, not
+                a runtime-proven cause.
+
+                1. Read the file:line locations the report suggests.
+                   Confirm the pattern the report describes is actually
+                   there.
+                2. If the suspected location is correct, make the
+                   minimum edit that resolves the bug.
+                3. If a brief read shows the suspected location is
+                   NOT the bug (the named pattern isn't there, or
+                   editing it wouldn't fix the symptom), STOP and
+                   print: `TRIAGE_MISS: <one-line why>`. Do not
+                   guess at a different location — the verify step
+                   will catch the miss and the next iteration can
+                   re-dispatch with full RCA.
+                4. After editing, run `bin/run-tests.sh pytest
+                   <relevant tests>`. Pick the tests cited or implied
+                   by the bug report, plus a small regression sweep.
+                5. Stop.
+                """)
+        else:
+            instructions = textwrap.dedent("""\
+                ## What to do
+
+                The RCA subagent took the **full RCA path** — the
+                report below is backed by an AppMap recording and
+                runtime call-tree evidence. Trust it.
+
+                1. Read the file:line locations the RCA cites.
+                2. Make the minimum edit that resolves the cause.
+                3. Run `bin/run-tests.sh pytest <relevant tests>`.
+                   Pick the tests cited or implied by the RCA, plus
+                   a small regression sweep over adjacent modules.
+                4. Stop.
+                """)
+
         return textwrap.dedent(f"""\
             **Step 2 — apply the fix.**
 
@@ -328,15 +376,21 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
 
             {rca_report}
 
-            ## What to do
+            {instructions}""")
 
-            1. Read the file:line locations the RCA cites.
-            2. Make the minimum edit that resolves the cause.
-            3. Run `bin/run-tests.sh pytest <relevant tests>`. Pick
-               the tests cited or implied by the RCA, plus a small
-               regression sweep over adjacent modules.
-            4. Stop.
-            """)
+    @staticmethod
+    def _is_triage_report(rca_report: str) -> bool:
+        """The subagent's first non-blank line is `report_type: triage`
+        or `report_type: full`. Default to full (treat-as-RCA) if the
+        marker is missing or malformed — the safer path under ambiguity."""
+        for line in rca_report.splitlines():
+            ln = line.strip().lower()
+            if not ln:
+                continue
+            if ln.startswith("report_type:"):
+                return ln.split(":", 1)[1].strip() == "triage"
+            return False  # first non-blank line wasn't the marker
+        return False
 
     def _step3_prompt(self, rca_report: str, instance: Dict) -> str:
         issue = self._issue_md(instance).strip()
