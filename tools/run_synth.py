@@ -254,7 +254,7 @@ def main():
                            "source /opt/miniconda3/bin/activate testbed\n"
                            "pip install -q -e . >/dev/null 2>&1\n")
     verify_cmd = [
-        "podman", "run", "--rm", "--platform", "linux/amd64",
+        "podman", "run", "--rm",
         "-v", f"{repo_dir}:{mount_path}", "-w", mount_path,
         "-e", "DATABASE_ENGINE=django.db.backends.sqlite3",
         "-e", "DATABASE_NAME=:memory:",
