@@ -90,7 +90,9 @@ def main():
     proc = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env)
 
     # Locate the harness's output and copy a flat summary into the run dir.
-    model = pred.get("model", "unknown")
+    model = (pred.get("model_name_or_path")
+             or pred.get("model")
+             or "unknown")
     src = REPO_ROOT / "logs" / "run_evaluation" / run_id / model / instance_id
     if src.is_dir():
         dst = eval_dir / instance_id

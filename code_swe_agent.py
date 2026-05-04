@@ -187,7 +187,9 @@ class CodeSWEAgent:
                     "error": f"Execution failed: {result['stderr']}",
                 }
 
-            patch = self.patch_extractor.extract_from_cli_output(result["stdout"], repo_path)
+            patch = self.patch_extractor.extract_from_cli_output(
+                result["stdout"], repo_path, base_commit=instance.get("base_commit")
+            )
 
             is_valid, error = self.patch_extractor.validate_patch(patch)
             if not is_valid:

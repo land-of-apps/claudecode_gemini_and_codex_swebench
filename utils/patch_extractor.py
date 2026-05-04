@@ -1,7 +1,7 @@
 import re
 import os
 import subprocess
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Set
 from unidiff import PatchSet
 import tempfile
 import difflib
@@ -19,38 +19,90 @@ class PatchExtractor:
             re.DOTALL
         )
         
-    def extract_from_cli_output(self, output: str, repo_path: str) -> str:
-        """Extract patch from Claude Code CLI output by analyzing git diff."""
+    def extract_from_cli_output(self, output: str, repo_path: str,
+                                 base_commit: Optional[str] = None) -> str:
+        """Extract patch from Claude Code CLI output by analyzing git diff.
+
+        When `base_commit` is supplied, the patch is filtered to drop hunks
+        for files not present at that commit. Necessary for backends (like
+        claude-appmap) that commit scaffolding files into HEAD: a raw
+        `git diff HEAD` would include modifications to those scaffolding
+        files, and the SWE-bench harness applies the patch to base_commit
+        where they don't exist — so the patch fails to apply.
+        """
         try:
             # Change to repo directory
             original_cwd = os.getcwd()
             os.chdir(repo_path)
-            
+
             # First, add any untracked files to the index so they appear in diff
             subprocess.run(
                 ["git", "add", "-N", "."],
                 capture_output=True,
                 text=True
             )
-            
+
             # Get the diff against HEAD to capture all changes
             result = subprocess.run(
                 ["git", "diff", "HEAD", "--no-color", "--no-ext-diff"],
                 capture_output=True,
                 text=True
             )
-            
+
             os.chdir(original_cwd)
-            
-            if result.returncode == 0:
-                return result.stdout
-            else:
+
+            if result.returncode != 0:
                 print(f"Git diff failed: {result.stderr}")
                 return ""
-                
+
+            patch = result.stdout
+            if base_commit:
+                patch = self._filter_to_base_commit_files(patch, repo_path, base_commit)
+            return patch
+
         except Exception as e:
             print(f"Error extracting patch: {e}")
             return ""
+
+    @staticmethod
+    def _filter_to_base_commit_files(patch: str, repo_path: str,
+                                      base_commit: str) -> str:
+        """Drop diff hunks whose target file did not exist at base_commit
+        AND is not a new test file (the agent's reproducer tests under
+        tests/ are kept — harmless, may be useful for analysis)."""
+        try:
+            r = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", base_commit],
+                cwd=repo_path, capture_output=True, text=True, check=True,
+            )
+            base_files = set(r.stdout.splitlines())
+        except Exception as e:
+            print(f"  warning: could not list base_commit files, returning unfiltered patch: {e}")
+            return patch
+
+        # Split patch into per-file blocks: each begins with `diff --git`.
+        blocks = re.split(r'(?m)^(?=diff --git )', patch)
+        kept = [b for b in blocks if b and PatchExtractor._block_is_kept(b, base_files)]
+        filtered = "".join(kept)
+        dropped = len(blocks) - len(kept)
+        if dropped:
+            print(f"  patch filter: dropped {dropped} non-base-commit file(s) from patch")
+        return filtered
+
+    @staticmethod
+    def _block_is_kept(block: str, base_files: set) -> bool:
+        # First line: `diff --git a/<path> b/<path>` — extract path.
+        first = block.splitlines()[0] if block else ""
+        m = re.match(r'^diff --git a/(.+?) b/', first)
+        if not m:
+            return False
+        path = m.group(1)
+        if path in base_files:
+            return True
+        # Allow agent-authored reproducer tests under tests/ (harmless to apply).
+        if path.startswith("tests/") and "test_repro" in path:
+            return True
+        return False
             
     def extract_from_response(self, response: str) -> List[Dict[str, str]]:
         """Extract file changes from Claude's response text."""
