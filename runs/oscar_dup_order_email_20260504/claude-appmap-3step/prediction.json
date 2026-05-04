@@ -1,0 +1,7 @@
+{
+  "instance_id": "synth__oscar_dup_order_email",
+  "model_name_or_path": "claude-opus-4-7",
+  "model_patch": "diff --git a/src/oscar/apps/checkout/mixins.py b/src/oscar/apps/checkout/mixins.py\nindex c8f6db2..687a99a 100644\n--- a/src/oscar/apps/checkout/mixins.py\n+++ b/src/oscar/apps/checkout/mixins.py\n@@ -243,15 +243,6 @@ class OrderPlacementMixin(CheckoutSessionMixin):\n         Override this view if you want to perform custom actions when an\n         order is submitted.\n         \"\"\"\n-        # Send the confirmation message early, so the customer receives it\n-        # even if any of the post-order session/redirect handling below\n-        # raises. Wrap in try/except so a transient email failure doesn't\n-        # block the success page from rendering.\n-        try:\n-            self.send_order_placed_email(order)\n-        except Exception:\n-            logger.exception(\"early confirmation email failed; continuing\")\n-\n         # Send confirmation message (normally an email)\n         self.send_order_placed_email(order)\n \n",
+  "patch_chars": 926,
+  "patch_files": 1
+}

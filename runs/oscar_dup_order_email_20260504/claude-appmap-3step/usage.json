@@ -1,0 +1,25 @@
+{
+  "instance_id": "synth__oscar_dup_order_email",
+  "partial": false,
+  "first_timestamp": "2026-05-04T20:49:11.850Z",
+  "last_timestamp": "2026-05-04T20:55:13.484Z",
+  "wall_seconds": 361.634,
+  "models": {
+    "claude-opus-4-7": {
+      "messages": 89,
+      "input_tokens": 133,
+      "cache_read_input_tokens": 2050634,
+      "cache_creation_input_tokens": 192772,
+      "output_tokens": 24733,
+      "estimated_cost_usd": 8.547396
+    }
+  },
+  "totals": {
+    "input_tokens": 133,
+    "cache_read_input_tokens": 2050634,
+    "cache_creation_input_tokens": 192772,
+    "output_tokens": 24733,
+    "estimated_cost_usd": 8.547396
+  },
+  "pricing_source": "builtin: see PRICING_PER_MTOK"
+}
