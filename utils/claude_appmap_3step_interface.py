@@ -301,12 +301,18 @@ class ClaudeAppMap3StepInterface(ClaudeAppMapMcpInterface):
             Read `issue.md`, then dispatch the `appmap-rca` subagent
             via `Agent(subagent_type="appmap-rca", ...)`.
 
-            Brief the subagent in your dispatch prompt:
-            - Paste the contents of `issue.md`.
-            - Note that NO AppMap recordings exist yet — the subagent
-              must record fresh via `bin/record-appmap.sh`.
-            - Ask for the standard RCA report format (## Root cause,
-              ## Evidence, ## Files / lines, ## Caveats).
+            Brief the subagent in your dispatch prompt with ONLY:
+            - The contents of `issue.md` (paste verbatim).
+            - The note that no AppMap recordings exist yet (so it
+              knows the recording state, in case it decides to record).
+
+            Do NOT tell the subagent which RCA path to take, what
+            report format to use, or whether to record. The subagent's
+            own system prompt covers that — it has a "First decision"
+            section that decides between a triage-only fast path and
+            a full RCA workflow based on the bug report. Adding format
+            or method requirements in your dispatch prompt overrides
+            that decision and forces the slow path.
 
             When the subagent returns, **print its report verbatim**.
             Then stop.
