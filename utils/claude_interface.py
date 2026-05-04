@@ -73,7 +73,7 @@ class ClaudeCodeInterface:
                 cwd=str(clone),
                 capture_output=True,
                 text=True,
-                timeout=600,
+                timeout=int(os.environ.get("CLAUDE_TIMEOUT", "1800")),
             )
             return {
                 "success": result.returncode == 0,
@@ -85,7 +85,7 @@ class ClaudeCodeInterface:
             return {
                 "success": False,
                 "stdout": "",
-                "stderr": "Command timed out after 10 minutes",
+                "stderr": f"Command timed out after CLAUDE_TIMEOUT seconds",
                 "returncode": -1,
             }
         except Exception as e:
