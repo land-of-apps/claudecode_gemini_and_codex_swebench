@@ -1,0 +1,16 @@
+{
+  "fixture_id": "oscar_n1_basket",
+  "backend": "claude-appmap-3step",
+  "model": "claude-opus-4-7",
+  "test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
+  "test_output_tail": "\n=================================== FAILURES ===================================\n________________ test_basket_lines_render_with_bounded_queries _________________\ntests/integration/basket/test_synth_verify.py:41: in test_basket_lines_render_with_bounded_queries\n    qc_small = _render_query_count(basket_small)\ntests/integration/basket/test_synth_verify.py:24: in _render_query_count\n    _ = line.stockrecord.price_excl_tax\nE   AttributeError: 'StockRecord' object has no attribute 'price_excl_tax'\n---------------------------- Captured stderr setup -----------------------------\nCreating test database for alias 'default'...\n--------------------------- Captured stderr teardown ---------------------------\nDestroying test database for alias 'default'...\n=========================== short test summary info ============================\nFAILED tests/integration/basket/test_synth_verify.py::test_basket_lines_render_with_bounded_queries\n============================== 1 failed in 4.16s ===============================\n",
+  "test_passed": false,
+  "patch_chars": 1087,
+  "patch_files_touched": [
+    "src/oscar/apps/basket/abstract_models.py"
+  ],
+  "expected_fix_files": [
+    "src/oscar/apps/basket/abstract_models.py"
+  ],
+  "fixed_correct_file": true
+}

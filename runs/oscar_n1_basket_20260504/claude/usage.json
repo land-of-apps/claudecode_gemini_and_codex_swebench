@@ -1,0 +1,25 @@
+{
+  "instance_id": "synth__oscar_n1_basket",
+  "partial": false,
+  "first_timestamp": "2026-05-04T21:16:25.368Z",
+  "last_timestamp": "2026-05-04T21:32:10.936Z",
+  "wall_seconds": 945.568,
+  "models": {
+    "claude-opus-4-7": {
+      "messages": 130,
+      "input_tokens": 143,
+      "cache_read_input_tokens": 12069271,
+      "cache_creation_input_tokens": 249519,
+      "output_tokens": 92322,
+      "estimated_cost_usd": 29.708683
+    }
+  },
+  "totals": {
+    "input_tokens": 143,
+    "cache_read_input_tokens": 12069271,
+    "cache_creation_input_tokens": 249519,
+    "output_tokens": 92322,
+    "estimated_cost_usd": 29.708683
+  },
+  "pricing_source": "builtin: see PRICING_PER_MTOK"
+}

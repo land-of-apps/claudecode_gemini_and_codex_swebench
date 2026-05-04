@@ -1,0 +1,25 @@
+{
+  "instance_id": "20260504_163704",
+  "partial": true,
+  "first_timestamp": "2026-05-04T20:37:09.703Z",
+  "last_timestamp": "2026-05-04T20:40:22.593Z",
+  "wall_seconds": 192.89,
+  "models": {
+    "claude-opus-4-7": {
+      "messages": 3,
+      "input_tokens": 11,
+      "cache_read_input_tokens": 58145,
+      "cache_creation_input_tokens": 17539,
+      "output_tokens": 1550,
+      "estimated_cost_usd": 0.532489
+    }
+  },
+  "totals": {
+    "input_tokens": 11,
+    "cache_read_input_tokens": 58145,
+    "cache_creation_input_tokens": 17539,
+    "output_tokens": 1550,
+    "estimated_cost_usd": 0.532489
+  },
+  "pricing_source": "builtin: see PRICING_PER_MTOK"
+}

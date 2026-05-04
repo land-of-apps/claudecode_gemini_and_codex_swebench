@@ -1,0 +1,7 @@
+{
+  "instance_id": "synth__oscar_n1_basket",
+  "model_name_or_path": "claude-opus-4-7",
+  "model_patch": "diff --git a/src/oscar/apps/basket/abstract_models.py b/src/oscar/apps/basket/abstract_models.py\nindex d4c93e9..22a420a 100644\n--- a/src/oscar/apps/basket/abstract_models.py\n+++ b/src/oscar/apps/basket/abstract_models.py\n@@ -128,8 +128,22 @@ class AbstractBasket(models.Model):\n         if self.id is None:\n             return self.lines.none()\n         if self._lines is None:\n-            self._lines = self.lines.all().order_by(\n-                self._meta.pk.name)\n+            self._lines = (\n+                self.lines\n+                .select_related(\n+                    'product',\n+                    'product__product_class',\n+                    'stockrecord',\n+                    'stockrecord__partner',\n+                )\n+                .prefetch_related(\n+                    'attributes',\n+                    'attributes__option',\n+                    'product__images',\n+                    'product__stockrecords',\n+                )\n+                .order_by(self._meta.pk.name)\n+            )\n         return self._lines\n \n     def max_allowed_quantity(self):\n",
+  "patch_chars": 1087,
+  "patch_files": 1
+}
