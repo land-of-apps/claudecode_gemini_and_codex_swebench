@@ -214,14 +214,19 @@ def archive_session_logs(clone: Path, run_dir: Path) -> None:
     """Copy claude session JSONLs whose `cwd` matches this clone into
     <run_dir>/sessions/. Belt-and-suspenders for the live symlink: if
     claude rotated sessions or the symlink target gets cleaned, the
-    archived copies still survive."""
+    archived copies still survive.
+
+    Subagent sessions live under <project>/<parent_session_id>/subagents/
+    *.jsonl and have their own usage blocks — they're billed but invisible
+    to the parent. We pick those up too and store under sessions/subagents/."""
     projects = Path.home() / ".claude" / "projects"
     if not projects.is_dir():
         return
     needle = f'"cwd":"{clone}"'
     target_root = run_dir / "sessions"
     copied: List[str] = []
-    for jsonl in projects.glob("*/*.jsonl"):
+    parent_files = list(projects.glob("*/*.jsonl"))
+    for jsonl in parent_files:
         try:
             head = jsonl.read_text(errors="ignore")[:32768]
         except Exception:
@@ -230,6 +235,17 @@ def archive_session_logs(clone: Path, run_dir: Path) -> None:
             target_root.mkdir(parents=True, exist_ok=True)
             shutil.copy2(jsonl, target_root / jsonl.name)
             copied.append(jsonl.name)
+            # Pick up any subagent sessions spawned by this parent.
+            subagent_dir = jsonl.parent / jsonl.stem / "subagents"
+            if subagent_dir.is_dir():
+                sub_target = target_root / "subagents"
+                sub_target.mkdir(exist_ok=True)
+                for sub in subagent_dir.glob("*.jsonl"):
+                    shutil.copy2(sub, sub_target / sub.name)
+                    copied.append(f"subagents/{sub.name}")
+                # also the .meta.json sidecars (small, useful)
+                for meta in subagent_dir.glob("*.meta.json"):
+                    shutil.copy2(meta, sub_target / meta.name)
     if copied:
         print(f"  archived {len(copied)} session log(s) → {target_root}", flush=True)
 
@@ -238,13 +254,16 @@ def archive_session_logs(clone: Path, run_dir: Path) -> None:
 
 def compute_and_save_usage(run_dir: Path, instance_id: str) -> None:
     """Aggregate per-message `usage` blocks from the archived session logs
-    and write <run_dir>/usage.json with token totals + estimated $ cost."""
+    and write <run_dir>/usage.json with token totals + estimated $ cost.
+
+    Includes parent + subagent sessions (subagents/*.jsonl) so the
+    reported cost matches what's actually billed."""
     sessions_dir = run_dir / "sessions"
     if not sessions_dir.is_dir():
         return
-    per_model, first_ts, last_ts = aggregate_usage(
-        sorted(sessions_dir.glob("*.jsonl"))
-    )
+    files = sorted(sessions_dir.glob("*.jsonl"))
+    files += sorted((sessions_dir / "subagents").glob("*.jsonl"))
+    per_model, first_ts, last_ts = aggregate_usage(files)
     write_usage_json(per_model, first_ts, last_ts, run_dir,
                      instance_id=instance_id, partial=False)
 
