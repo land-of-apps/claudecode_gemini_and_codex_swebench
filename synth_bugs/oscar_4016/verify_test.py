@@ -1,0 +1,52 @@
+"""Hidden verification test — never lives in the agent's repo.
+
+Lifted verbatim from the gold PR (django-oscar PR #4095, commit
+3f7101a52922) that fixed issue #4016. Asserts that two exclusive
+offers, applied in order [offer2, offer1], result in only ONE
+applied offer (not both)."""
+
+import pytest
+from oscar.apps.offer.applicator import Applicator
+from oscar.test.factories import (
+    BasketFactory, ConditionalOfferFactory, ProductFactory, VoucherFactory
+)
+
+
+@pytest.fixture
+def filled_basket(db):
+    basket = BasketFactory()
+    products = [ProductFactory(stockrecords__price=10) for _ in range(2)]
+    for p in products:
+        basket.add_product(p, quantity=10)
+    return basket
+
+
+@pytest.mark.django_db
+def test_apply_multiple_vouchers(filled_basket):
+    offer1 = ConditionalOfferFactory(
+        condition__range__includes_all_products=True,
+        benefit__range__includes_all_products=True,
+        name='offer1',
+        exclusive=True,
+    )
+    voucher1 = VoucherFactory(name="voucher1", code="VOUCHER1")
+    voucher1.offers.add(offer1)
+    offer2 = ConditionalOfferFactory(
+        condition__range__includes_all_products=True,
+        benefit__range__includes_all_products=True,
+        name='offer2',
+        exclusive=True,
+    )
+    voucher2 = VoucherFactory(name="voucher2", code="VOUCHER2")
+    voucher2.offers.add(offer2)
+    offer1.exclusive = True
+    offer2.exclusive = True
+
+    assert len(filled_basket.offer_applications) == 0
+    Applicator().apply_offers(
+        basket=filled_basket,
+        offers=[offer2, offer1]
+    )
+    filled_basket.refresh_from_db()
+    # Only one should be applied because they're both exclusive.
+    assert len(filled_basket.offer_applications) == 1

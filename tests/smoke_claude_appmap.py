@@ -94,9 +94,9 @@ def main() -> int:
         )
 
     # 4) Run the backend.
-    print("instantiating ClaudeAppMapInterface...", flush=True)
-    from utils.claude_appmap_interface import ClaudeAppMapInterface
-    iface = ClaudeAppMapInterface()
+    print("instantiating ClaudeAppMapMcpInterface...", flush=True)
+    from utils.claude_appmap_mcp_interface import ClaudeAppMapMcpInterface
+    iface = ClaudeAppMapMcpInterface()
     print("running claude-appmap backend (this is the long phase)...", flush=True)
     result = iface.execute_code_cli(prompt="", cwd=str(clone), instance=instance)
 

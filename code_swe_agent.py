@@ -17,7 +17,7 @@ from tqdm import tqdm
 import jsonlines
 
 from utils.claude_interface import ClaudeCodeInterface
-from utils.claude_appmap_interface import ClaudeAppMapInterface
+from utils.claude_appmap_mcp_interface import ClaudeAppMapMcpInterface
 from utils.codex_interface import CodexCodeInterface
 from utils.gemini_interface import GeminiCodeInterface
 from utils.prompt_formatter import PromptFormatter
@@ -51,8 +51,8 @@ class CodeSWEAgent:
             self.interface = CodexCodeInterface()
         elif self.backend == "gemini":
             self.interface = GeminiCodeInterface()
-        elif self.backend == "claude-appmap":
-            self.interface = ClaudeAppMapInterface()
+        elif self.backend == "claude-appmap-mcp":
+            self.interface = ClaudeAppMapMcpInterface()
         else:
             self.backend = "claude"
             self.interface = ClaudeCodeInterface()
@@ -66,7 +66,7 @@ class CodeSWEAgent:
         # Resolve model name from alias. If no model was specified and we're
         # running a claude-family backend, default to sonnet so the comparison
         # against the appmap variant uses the same (cheaper) baseline.
-        if not model and self.backend in ("claude", "claude-appmap"):
+        if not model and self.backend in ("claude", "claude-appmap-mcp"):
             model = DEFAULT_CLAUDE_MODEL
         self.model = get_model_name(model, self.backend) if model else None
         self.model_alias = model  # Keep original alias for logging
@@ -170,7 +170,7 @@ class CodeSWEAgent:
 
             model_info = f" with model {self.model_alias}" if self.model else ""
             print(f"Running {self.backend.title()} Code{model_info}...")
-            if self.backend == "claude-appmap":
+            if self.backend == "claude-appmap-mcp":
                 result = self.interface.execute_code_cli(
                     prompt, repo_path, self.model, instance=instance
                 )
@@ -345,7 +345,7 @@ def main():
     parser.add_argument("--model", type=str,
                        help="Model to use (e.g., opus-4.1, codex-4.2, or any name)")
     parser.add_argument("--backend", type=str,
-                       choices=["claude", "claude-appmap", "codex", "gemini"],
+                       choices=["claude", "claude-appmap-mcp", "codex", "gemini"],
                        help="Code model backend to use")
     
     args = parser.parse_args()
@@ -357,7 +357,7 @@ def main():
         cli_cmd = "codex"
     elif backend == "gemini":
         cli_cmd = "gemini"
-    elif backend == "claude-appmap":
+    elif backend == "claude-appmap-mcp":
         cli_cmd = "claude"
     else:
         cli_cmd = "claude"

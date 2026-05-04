@@ -1,7 +1,7 @@
 """Cross-backend cost / token comparison report.
 
 For each (backend, instance_id) found under ./work/, computes the same
-usage stats that ClaudeAppMapInterface writes to <run_dir>/usage.json:
+usage stats that ClaudeAppMapMcpInterface writes to <run_dir>/usage.json:
   - Reads usage.json directly when present (claude-appmap runs).
   - Otherwise scans ~/.claude/projects/ for session JSONLs whose recorded
     `cwd` matches the run's clone dir, aggregates them, and writes a fresh
@@ -23,7 +23,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from utils.claude_appmap_interface import ClaudeAppMapInterface
+from utils.claude_appmap_mcp_interface import ClaudeAppMapMcpInterface
 
 WORK_ROOT = REPO_ROOT / "work"
 
@@ -77,7 +77,7 @@ def ensure_usage_json(run_dir: Path, backend: str, instance_id: str) -> dict | N
     if not matching:
         return None
 
-    iface = ClaudeAppMapInterface.__new__(ClaudeAppMapInterface)
+    iface = ClaudeAppMapMcpInterface.__new__(ClaudeAppMapMcpInterface)
     per_model, first_ts, last_ts = iface._aggregate_usage(matching)
     iface._write_usage_json(per_model, first_ts, last_ts, run_dir,
                             instance_id=instance_id, partial=False)
@@ -151,9 +151,9 @@ def main():
         if len(group) < 2:
             continue
         backends = {r["backend"]: r for r in group}
-        if "claude" in backends and "claude-appmap" in backends:
+        if "claude" in backends and "claude-appmap-mcp" in backends:
             v = backends["claude"]
-            a = backends["claude-appmap"]
+            a = backends["claude-appmap-mcp"]
             ratio_cost = a["cost_usd"] / v["cost_usd"] if v["cost_usd"] else float("inf")
             ratio_wall = a["wall_s"] / v["wall_s"] if v["wall_s"] else float("inf")
             print(f"  {inst}:")

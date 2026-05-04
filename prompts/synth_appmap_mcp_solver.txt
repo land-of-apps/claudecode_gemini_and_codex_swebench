@@ -1,0 +1,62 @@
+/appmap-fix Find and fix the bug described in issue.md
+
+## Runtime environment
+
+To run a test in the project's runtime (correct deps, env vars, DB):
+
+    bin/run-tests.sh        <args>   — same container, no instrumentation
+    bin/record-appmap.sh    <args>   — same container, recorded under
+                                       appmap-python; produces .appmap.json
+                                       files under tmp/appmap/ that the
+                                       host-side watcher indexes for the
+                                       AppMap MCP
+
+The project's deps are pre-installed in the container; no pip churn
+on first run. Do NOT invoke pytest directly on the host.
+
+## Diagnostic workflow — appmap-fix
+
+Drive the diagnosis from runtime data. The principles in the
+appmap-fix skill apply here in particular:
+
+- **Construct one focused test program first.** Write a small test
+  (or script) that exercises exactly the suspected behavior — not a
+  broad sweep. One recording with the relevant call path, named
+  after the bug.
+- **Start with a MINIMAL `appmap.yml`** — no `packages:` section.
+  Built-in instrumentation (HTTP, SQL, exceptions, canonical labels)
+  is usually enough to orient. The default `appmap.yml` already
+  reflects this; do not add `packages: [.]` or any broad scope.
+- **Anchor labels before broadening scope.** If built-ins don't
+  surface the cause, label 2-4 candidate functions with a transient
+  tag (`bug.<id>`) and re-record. Add `packages:` only as a last
+  resort, one at a time.
+- **Use the MCP verb that fits the question.** `find_calls`,
+  `find_queries`, `find_exceptions`, `find_logs` answer "what
+  happened?". `get_call_tree` answers "in what order, with what
+  parents/children?". Reach for the call tree when you need the
+  structural view, not as a default first probe.
+- **Don't fish on `find_recordings`.** Each call should target a
+  recording you just produced (filter by `appmap=<test-name-fragment>`)
+  or by `exception=` / `route=` / `status=`. Don't call
+  `find_recordings()` with no filter.
+
+You may read source code at any time — that's fine and expected. But
+every diagnostic claim ("the bug is in X") must be backed by a
+recording or MCP result, not by reading alone. The point of running
+with AppMap is that runtime data, not your priors, validates the
+diagnosis.
+
+## Fix and verify (mandatory)
+
+After making the fix:
+
+1. Re-run your reproducer test via `bin/record-appmap.sh`.
+2. Use the AppMap MCP to confirm the runtime change — the
+   previously-firing buggy call no longer fires, the expected branch
+   now executes, the redundant SQL is gone, the right exception
+   path runs, etc. Cite the specific MCP query result.
+3. Run the broader test suite for the affected area via
+   `bin/run-tests.sh` for regression check.
+
+Submit only when (2) confirms the runtime change and (3) is green.

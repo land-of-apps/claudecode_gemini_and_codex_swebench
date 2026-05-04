@@ -1,0 +1,11 @@
+{
+  "bugged_clone": "/Users/kgilpin/tmp/synth_oscar_4016",
+  "instance_image": "synth-oscar-test:latest",
+  "container_mount": "/app",
+  "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
+  "verify_test_src": "synth_bugs/oscar_4016/verify_test.py",
+  "verify_test_dst": "tests/integration/basket/test_synth_verify.py",
+  "verify_test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
+  "fix_files": ["src/oscar/apps/basket/utils.py"],
+  "bug_summary": "OfferApplications.available() exclusivity check uses 'a.id < offer.id' instead of 'a.id != offer.id'; same-priority exclusive offers can both apply when added in the right order. Caught by gold test from PR #4095."
+}
