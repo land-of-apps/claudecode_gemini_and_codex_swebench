@@ -103,3 +103,15 @@ venv
 /*.json
 !/package*.json
 /logs/run_evaluation/
+/logs/*.md
+
+# Per-run artifacts — dirs are tracked via .gitkeep, contents are ephemeral
+/predictions/*
+!/predictions/.gitkeep
+/results/*
+!/results/.gitkeep
+/evaluation_results/*
+!/evaluation_results/.gitkeep
+
+# Editor backups / leftovers
+**/*.bak
