@@ -1,0 +1,17 @@
+--- a/src/oscar/apps/basket/abstract_models.py
++++ b/src/oscar/apps/basket/abstract_models.py
+@@ -128,12 +128,8 @@
+         if self.id is None:
+             return self.lines.none()
+         if self._lines is None:
+-            self._lines = (
+-                self.lines
+-                .select_related('product', 'stockrecord')
+-                .prefetch_related(
+-                    'attributes', 'product__images')
+-                .order_by(self._meta.pk.name))
++            self._lines = self.lines.all().order_by(
++                self._meta.pk.name)
+         return self._lines
+ 
+     def max_allowed_quantity(self):

@@ -1,0 +1,18 @@
+--- a/src/oscar/apps/checkout/mixins.py
++++ b/src/oscar/apps/checkout/mixins.py
+@@ -243,6 +243,15 @@
+         Override this view if you want to perform custom actions when an
+         order is submitted.
+         """
++        # Send the confirmation message early, so the customer receives it
++        # even if any of the post-order session/redirect handling below
++        # raises. Wrap in try/except so a transient email failure doesn't
++        # block the success page from rendering.
++        try:
++            self.send_order_placed_email(order)
++        except Exception:
++            logger.exception("early confirmation email failed; continuing")
++
+         # Send confirmation message (normally an email)
+         self.send_order_placed_email(order)
+ 

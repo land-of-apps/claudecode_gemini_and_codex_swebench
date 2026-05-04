@@ -2,7 +2,7 @@
   "_format_version": 2,
   "_format_notes": "v2: clean_upstream + bug_patch + verify_patch (declarative, agent's repo has no bug history). v1 used bugged_clone (deprecated).",
 
-  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_4016_clean",
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_clean",
   "bug_patch": "synth_bugs/oscar_4016/bug.patch",
   "verify_patch": "synth_bugs/oscar_4016/verify.patch",
 

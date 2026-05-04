@@ -1,0 +1,17 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2: clean_upstream + bug_patch + verify_patch. See synth_bugs/oscar_4016/fixture.json and synth_bugs/PROPOSED.md for context.",
+
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_clean",
+  "bug_patch": "synth_bugs/oscar_n1_basket/bug.patch",
+  "verify_patch": "synth_bugs/oscar_n1_basket/verify.patch",
+
+  "instance_image": "synth-oscar-test:latest",
+  "container_mount": "/app",
+  "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
+
+  "verify_test_command": "pytest tests/integration/basket/test_synth_verify.py -v --tb=short",
+  "fix_files": ["src/oscar/apps/basket/abstract_models.py"],
+
+  "bug_summary": "Basket.all_lines() in basket/abstract_models.py loses select_related('product','stockrecord') and prefetch_related('attributes','product__images'); per-line attribute access in templates re-issues queries, causing render time to scale linearly with line count."
+}
