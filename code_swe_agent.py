@@ -229,6 +229,11 @@ class CodeSWEAgent:
           <run_dir>/prediction.jsonl  — single-line, SWE-bench harness format
           <run_dir>/prediction.json   — pretty-printed for browsing
 
+        SWE-bench's run_evaluation expects keys `instance_id`,
+        `model_name_or_path`, `model_patch`. The internal `prediction`
+        dict from PatchExtractor uses `model` and `prediction` instead, so
+        we translate at the persistence boundary.
+
         Per-run files (one per backend × instance × timestamp) so concurrent
         comparison runs don't overwrite each other and each run is self-
         contained for downstream evaluation."""
@@ -236,9 +241,15 @@ class CodeSWEAgent:
         run_dir = resolve_run_dir(Path(repo_path).resolve(), instance_id)
         try:
             run_dir.mkdir(parents=True, exist_ok=True)
-            (run_dir / "prediction.jsonl").write_text(json.dumps(prediction) + "\n")
+            harness_pred = {
+                "instance_id": instance_id,
+                "model_name_or_path": prediction.get("model")
+                                      or prediction.get("model_name_or_path", "unknown"),
+                "model_patch": patch,
+            }
+            (run_dir / "prediction.jsonl").write_text(json.dumps(harness_pred) + "\n")
             pretty = {
-                **prediction,
+                **harness_pred,
                 "patch_chars": len(patch or ""),
                 "patch_files": _count_patch_files(patch),
             }
