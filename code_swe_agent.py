@@ -27,6 +27,12 @@ from utils.model_registry import get_model_name
 
 DEFAULT_BACKEND = os.environ.get("CODE_SWE_BACKEND", "claude")
 
+
+def _count_patch_files(patch: str) -> int:
+    if not patch:
+        return 0
+    return sum(1 for line in patch.splitlines() if line.startswith("diff --git "))
+
 # Default model for the claude / claude-appmap backends when --model is not
 # specified. Pin to opus — the appmap-fix workflow is multi-step and sonnet
 # tends to bail after step 1 or skip recording entirely, which defeats the
@@ -193,6 +199,7 @@ class CodeSWEAgent:
             )
 
             self._save_result(instance_id, result, patch)
+            self._save_run_prediction(repo_path, instance_id, prediction, patch)
 
             return prediction
 
@@ -214,6 +221,33 @@ class CodeSWEAgent:
 
             # Workspace is preserved under ./work/<instance_id>/<timestamp>/repo
             # for inspection; manually clean ./work/ when no longer needed.
+    def _save_run_prediction(self, repo_path: str, instance_id: str,
+                              prediction: Dict, patch: str) -> None:
+        """Persist the per-run prediction in the run dir.
+
+        Two outputs:
+          <run_dir>/prediction.jsonl  — single-line, SWE-bench harness format
+          <run_dir>/prediction.json   — pretty-printed for browsing
+
+        Per-run files (one per backend × instance × timestamp) so concurrent
+        comparison runs don't overwrite each other and each run is self-
+        contained for downstream evaluation."""
+        from utils.claude_session import resolve_run_dir
+        run_dir = resolve_run_dir(Path(repo_path).resolve(), instance_id)
+        try:
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "prediction.jsonl").write_text(json.dumps(prediction) + "\n")
+            pretty = {
+                **prediction,
+                "patch_chars": len(patch or ""),
+                "patch_files": _count_patch_files(patch),
+            }
+            (run_dir / "prediction.json").write_text(json.dumps(pretty, indent=2))
+            print(f"  prediction → {run_dir}/prediction.jsonl ({len(patch or '')} chars)",
+                  flush=True)
+        except Exception as e:
+            print(f"  warning: failed to save run prediction: {e}", flush=True)
+
     def _save_result(self, instance_id: str, result: Dict, patch: str):
         """Save detailed results for debugging."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -287,8 +321,8 @@ class CodeSWEAgent:
 def main():
     parser = argparse.ArgumentParser(description="Run code models on SWE-bench")
     parser.add_argument("--dataset_name", type=str,
-                       default="princeton-nlp/SWE-bench_Lite",
-                       help="Dataset to use")
+                       default="princeton-nlp/SWE-bench_Verified",
+                       help="Dataset to use (default: Verified — human-curated subset)")
     parser.add_argument("--instance_id", type=str,
                        help="Run on a specific instance ID")
     parser.add_argument("--limit", type=int,
