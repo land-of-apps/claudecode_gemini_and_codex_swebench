@@ -16,13 +16,34 @@ on first run. Do NOT invoke pytest directly on the host.
 
 ## Diagnostic workflow — appmap-fix
 
-Drive the diagnosis from runtime data. The principles in the
-appmap-fix skill apply here in particular:
+Treat the bug report the way you'd treat a real user report on the
+project's issue tracker.
 
-- **Construct one focused test program first.** Write a small test
-  (or script) that exercises exactly the suspected behavior — not a
-  broad sweep. One recording with the relevant call path, named
-  after the bug.
+**Reproduce the user's flow under recording — not via a unittest fixture.**
+
+The bug describes what a user did. Your first move is to perform
+those same actions against the actual application, with
+`bin/record-appmap.sh` wrapping the process. You should NOT write a
+unittest test that constructs the relevant objects by hand and then
+asserts on internals — that's not what the user did, and it skips
+the very runtime behavior you need recorded.
+
+Concretely, do one of these:
+
+- **Run the application** (e.g. `python manage.py runserver` for a
+  Django app, the project's `make run` target, or whatever brings
+  up the app) wrapped in `bin/record-appmap.sh`, then drive the
+  user steps with `curl` / `httpx`. AppMap's built-in HTTP middleware
+  records each request as its own recording keyed by route.
+- **Use the project's own shell / management commands** (e.g.
+  Django's `manage.py shell`, oscar's `manage.py oscar_*` commands)
+  to perform the same operations. Wrap with `bin/record-appmap.sh`;
+  the process recorder captures the call tree.
+
+Either way, you reproduce the flow, recordings appear under
+`tmp/appmap/`, and you investigate from there. The principles below
+apply throughout:
+
 - **Start with a MINIMAL `appmap.yml`** — no `packages:` section.
   Built-in instrumentation (HTTP, SQL, exceptions, canonical labels)
   is usually enough to orient. The default `appmap.yml` already
@@ -31,21 +52,17 @@ appmap-fix skill apply here in particular:
   surface the cause, label 2-4 candidate functions with a transient
   tag (`bug.<id>`) and re-record. Add `packages:` only as a last
   resort, one at a time.
-- **Use the MCP verb that fits the question.** `find_calls`,
-  `find_queries`, `find_exceptions`, `find_logs` answer "what
-  happened?". `get_call_tree` answers "in what order, with what
-  parents/children?". Reach for the call tree when you need the
-  structural view, not as a default first probe.
-- **Don't fish on `find_recordings`.** Each call should target a
-  recording you just produced (filter by `appmap=<test-name-fragment>`)
-  or by `exception=` / `route=` / `status=`. Don't call
-  `find_recordings()` with no filter.
+- **Use the MCP verb that fits the question.** `find_requests`,
+  `find_calls`, `find_queries`, `find_exceptions`, `find_logs`
+  answer "what happened?". `get_call_tree` answers "in what order,
+  with what parents/children?". Reach for the call tree when you
+  need the structural view, not as a default first probe.
 
 You may read source code at any time — that's fine and expected. But
 every diagnostic claim ("the bug is in X") must be backed by a
 recording or MCP result, not by reading alone. The point of running
-with AppMap is that runtime data, not your priors, validates the
-diagnosis.
+with AppMap is that runtime data — captured during the user's
+actual flow — validates the diagnosis.
 
 ## Fix and verify (mandatory)
 

@@ -1,4 +1,4 @@
-You are a software engineer. Find and fix the bug described below.
+Find and fix the bug described below.
 
 ## Bug report
 
@@ -6,43 +6,13 @@ You are a software engineer. Find and fix the bug described below.
 
 ## Runtime environment
 
-You do NOT have a local Python environment for this project. To run
-any test or script in the project's runtime (correct deps, env vars,
-DB), use this wrapper:
+A working runtime for this project is available in a container, via:
 
-    bin/run-tests.sh <pytest-or-runner args>
+    bin/run-tests.sh <command>
 
-Examples:
-    bin/run-tests.sh pytest tests/some/test_file.py
-    bin/run-tests.sh pytest tests/some/test_file.py::test_method -v
-    bin/run-tests.sh pytest -k "name_pattern" tests/some_dir/
+You can use it to exercise the code at runtime — run tests, drop into
+a shell, run a script, hit an endpoint — whatever helps you investigate
+or verify. The container has all dependencies installed.
 
-Do NOT invoke pytest, the Django test runner, or any project script
-directly on the host — only via this wrapper.
-
-## Diagnostic workflow
-
-Investigate by reading source code, supplemented with temporary
-diagnostic logging when reading alone isn't conclusive:
-
-1. Read the source files in the suspected area to form a hypothesis.
-2. If the cause is not obvious from reading, add temporary diagnostic
-   output to the suspected code paths (e.g. `print(...)` /
-   `logger.info(...)`) so you can observe runtime values.
-3. Run a relevant existing test (or write one) via bin/run-tests.sh
-   and inspect the output.
-4. Iterate on the hypothesis until the cause is identified.
-5. Remove any temporary diagnostic output you added.
-
-## Fix and verify (mandatory)
-
-Once you've identified the cause:
-
-6. Make the source-code fix.
-7. **Verification is mandatory before submitting.** Pick or write a
-   test that exercises the bug, run it via bin/run-tests.sh, and
-   confirm it passes.
-8. Run the broader test suite for the affected area via
-   bin/run-tests.sh to check for regressions.
-
-Submit when steps 7 and 8 both pass.
+You are expected to verify your fix using this environment before
+submitting.
