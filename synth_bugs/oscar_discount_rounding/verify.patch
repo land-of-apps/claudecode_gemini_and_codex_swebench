@@ -1,0 +1,37 @@
+--- a/tests/integration/offer/test_synth_verify.py
++++ b/tests/integration/offer/test_synth_verify.py
+@@ -0,0 +1,34 @@
++"""Hidden verification test — never lives in the agent's repo.
++
++Oscar's offer rounding is supposed to favor the merchant: half-cent
++fractions round DOWN, never UP. A change in rounding mode away from
++ROUND_DOWN (e.g. ROUND_HALF_UP, ROUND_HALF_EVEN, plain ROUND_UP)
++causes discounts to be 1p higher than intended on certain inputs,
++drifting reconciliation totals at month-end.
++"""
++
++from decimal import Decimal as D
++
++import pytest
++
++from oscar.apps.offer.models import Benefit
++
++
++@pytest.mark.django_db
++def test_offer_round_keeps_round_down_semantics():
++    benefit = Benefit()
++
++    # 0.025 sits exactly on a half-cent boundary. ROUND_DOWN gives
++    # 0.02; any rounding mode that goes "to nearest" or upward will
++    # give 0.03. The test is sensitive enough to catch ROUND_HALF_UP,
++    # ROUND_HALF_EVEN, ROUND_CEILING, ROUND_UP.
++    assert benefit.round(D("0.025")) == D("0.02"), (
++        f"Benefit.round(0.025) returned a value that isn't ROUND_DOWN. "
++        f"Discounts will be over-applied by 1p on half-cent boundaries — "
++        f"reconciliation totals will drift across orders."
++    )
++
++    # 0.029 is past the half-cent boundary. Both ROUND_DOWN and
++    # ROUND_HALF_UP yield 0.02 here, so this assertion is a
++    # cross-check that doesn't depend on which faulty mode was chosen.
++    assert benefit.round(D("0.029")) == D("0.02")

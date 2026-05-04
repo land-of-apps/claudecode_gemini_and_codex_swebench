@@ -1,0 +1,34 @@
+"""Hidden verification test — never lives in the agent's repo.
+
+A user pastes a voucher code from email/marketing copy in lowercase
+("spring24"); the matching Voucher row is stored uppercase
+("SPRING24") because Voucher.save() uppercases on persist. The
+basket voucher form's `clean_code` must normalize submitted input
+to match — otherwise the case-sensitive DB lookup misses the
+voucher and the user sees "Voucher not found."
+"""
+
+import pytest
+
+from oscar.apps.basket.forms import BasketVoucherForm
+from oscar.apps.voucher.models import Voucher
+from oscar.test.factories import VoucherFactory
+
+
+@pytest.mark.django_db
+def test_lowercase_voucher_code_resolves_to_uppercase_record():
+    # Voucher.save() upper-cases on persist; this row will be stored
+    # as "SPRING24" regardless of how we hand it to the factory.
+    VoucherFactory(code="SPRING24")
+
+    form = BasketVoucherForm(data={"code": "spring24"})
+    assert form.is_valid(), f"form errors: {form.errors!r}"
+
+    cleaned_code = form.cleaned_data["code"]
+
+    assert Voucher.objects.filter(code=cleaned_code).exists(), (
+        f"After cleaning, code is {cleaned_code!r} but no voucher matches. "
+        f"Stored codes: {list(Voucher.objects.values_list('code', flat=True))}. "
+        f"The form's clean_code is not normalising input to match the "
+        f"uppercase-on-save convention used by Voucher.save()."
+    )

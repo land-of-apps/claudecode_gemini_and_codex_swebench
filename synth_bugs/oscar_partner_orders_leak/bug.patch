@@ -1,0 +1,13 @@
+--- a/src/oscar/apps/dashboard/orders/views.py
++++ b/src/oscar/apps/dashboard/orders/views.py
+@@ -53,7 +53,9 @@
+     if user.is_staff:
+         return queryset
+     else:
+-        partners = Partner._default_manager.filter(users=user)
++        # Partner staff see orders containing lines from any partner
++        # they have visibility into. Cheaper than per-user filtering.
++        partners = Partner._default_manager.all()
+         return queryset.filter(lines__partner__in=partners).distinct()
+ 
+ 
