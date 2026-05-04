@@ -1,0 +1,67 @@
+--- a/tests/integration/checkout/test_synth_verify.py
++++ b/tests/integration/checkout/test_synth_verify.py
+@@ -0,0 +1,64 @@
++"""Hidden verification test — never lives in the agent's repo.
++
++When `handle_payment` raises `PaymentError` inside
++`PaymentDetailsView.submit()`, the basket-freeze that happened
++earlier in the flow must be undone before returning. Otherwise the
++customer's basket sits in FROZEN status indefinitely and they cannot
++continue shopping or retry checkout. Asserted by mocking the
++exception path and checking `restore_frozen_basket` is invoked.
++"""
++
++from unittest.mock import MagicMock
++
++import pytest
++
++from oscar.apps.checkout.views import PaymentDetailsView
++from oscar.apps.payment.exceptions import PaymentError
++
++
++@pytest.mark.django_db
++def test_payment_error_branch_thaws_frozen_basket():
++    view = PaymentDetailsView()
++
++    # Stub everything the submit() method touches besides the freeze/
++    # restore lifecycle that the test is actually about.
++    view.request = MagicMock()
++    view.checkout_session = MagicMock()
++    view.generate_order_number = MagicMock(return_value="TEST-0001")
++    view.freeze_basket = MagicMock()
++    view.restore_frozen_basket = MagicMock()
++    view.handle_payment = MagicMock(side_effect=PaymentError("gateway down"))
++    view.render_preview = MagicMock(return_value=None)
++    view.render_payment_details = MagicMock(return_value=None)
++
++    # `submit` asserts shipping_charge.is_tax_known; supply a stub
++    # that satisfies that gate.
++    shipping_charge = MagicMock()
++    shipping_charge.is_tax_known = True
++
++    view.submit(
++        user=MagicMock(),
++        basket=MagicMock(),
++        shipping_address=None,
++        shipping_method=None,
++        shipping_charge=shipping_charge,
++        billing_address=None,
++        order_total=None,
++    )
++
++    # The freeze must have happened (otherwise the test premise is
++    # broken — there's nothing to thaw).
++    assert view.freeze_basket.call_count == 1, (
++        f"freeze_basket was not invoked (count={view.freeze_basket.call_count}); "
++        f"the test premise requires the freeze step to have run."
++    )
++
++    # The actual claim under test: a PaymentError must result in a
++    # restore_frozen_basket call so the customer's basket is thawed.
++    assert view.restore_frozen_basket.call_count == 1, (
++        f"PaymentError branch did NOT call restore_frozen_basket "
++        f"(call_count={view.restore_frozen_basket.call_count}). "
++        f"After a payment-gateway failure the basket stays in FROZEN "
++        f"status; the customer cannot modify it or retry checkout "
++        f"without clearing their session."
++    )

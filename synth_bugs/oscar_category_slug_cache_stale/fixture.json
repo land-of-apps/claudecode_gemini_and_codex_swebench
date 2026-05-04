@@ -1,0 +1,17 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture, designed to test the symptom-to-location-gap hypothesis. The clean upstream has cache.delete(...) calls in Category.save() that were ADDED relative to vanilla oscar; the bug.patch removes them. So 'clean state' = 'oscar with hypothetical cache-invalidation PR applied'. See PROPOSED_v2.md.",
+
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_clean",
+  "bug_patch": "synth_bugs/oscar_category_slug_cache_stale/bug.patch",
+  "verify_patch": "synth_bugs/oscar_category_slug_cache_stale/verify.patch",
+
+  "instance_image": "synth-oscar-test:latest",
+  "container_mount": "/app",
+  "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
+
+  "verify_test_command": "pytest tests/integration/catalogue/test_synth_verify.py -v --tb=short",
+  "fix_files": ["src/oscar/apps/catalogue/abstract_models.py"],
+
+  "bug_summary": "Category.save() does not invalidate the URL slug cache populated by Category.get_full_slug(). After a slug rename, get_full_slug returns the cached pre-rename value indefinitely (or until the worker restarts). Symptoms appear in the URL-rendering layer (breadcrumbs, sitemaps, category pages); cause is in the model save path."
+}

@@ -1,0 +1,10 @@
+--- a/src/oscar/apps/checkout/views.py
++++ b/src/oscar/apps/checkout/views.py
+@@ -603,7 +603,6 @@
+             msg = str(e)
+             logger.error("Order #%s: payment error (%s)", order_number, msg,
+                          exc_info=True)
+-            self.restore_frozen_basket()
+             return self.render_preview(
+                 self.request, error=error_msg, **payment_kwargs)
+         except Exception as e:

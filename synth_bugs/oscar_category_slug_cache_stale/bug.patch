@@ -1,0 +1,15 @@
+--- a/src/oscar/apps/catalogue/abstract_models.py
++++ b/src/oscar/apps/catalogue/abstract_models.py
+@@ -210,12 +210,6 @@
+         if not self.slug:
+             self.slug = self.generate_slug()
+         super().save(*args, **kwargs)
+-        # Bust the cached full_slug for this category and any descendants:
+-        # changing self.slug invalidates URLs for the whole subtree.
+-        cache.delete(self.get_url_cache_key())
+-        if self.pk:
+-            for descendant in self.get_descendants():
+-                cache.delete(descendant.get_url_cache_key())
+ 
+     def set_ancestors_are_public(self):
+         # Update ancestors_are_public for the sub tree.

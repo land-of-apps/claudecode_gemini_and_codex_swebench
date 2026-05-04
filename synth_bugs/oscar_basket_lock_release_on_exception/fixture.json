@@ -1,0 +1,17 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture, designed to test the symptom-to-location-gap hypothesis. See synth_bugs/PROPOSED_v2.md.",
+
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_clean",
+  "bug_patch": "synth_bugs/oscar_basket_lock_release_on_exception/bug.patch",
+  "verify_patch": "synth_bugs/oscar_basket_lock_release_on_exception/verify.patch",
+
+  "instance_image": "synth-oscar-test:latest",
+  "container_mount": "/app",
+  "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
+
+  "verify_test_command": "pytest tests/integration/checkout/test_synth_verify.py -v --tb=short",
+  "fix_files": ["src/oscar/apps/checkout/views.py"],
+
+  "bug_summary": "PaymentDetailsView.submit's `except PaymentError` branch is missing the self.restore_frozen_basket() call that the other four exception branches (UnableToTakePayment, generic Exception, UnableToPlaceOrder, fallback) all make. Customers whose payment hits a server-side gateway error end up with their basket frozen indefinitely."
+}
