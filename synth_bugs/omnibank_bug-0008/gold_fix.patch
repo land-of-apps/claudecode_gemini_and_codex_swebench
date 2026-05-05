@@ -1,0 +1,70 @@
+diff --git a/payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java b/payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java
+index 9628e41..805e39c 100644
+--- a/payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java
++++ b/payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java
+@@ -35,32 +35,41 @@ public class PaymentServiceImpl implements PaymentService {
+     @Override
+     @Transactional
+     public PaymentId submit(PaymentRequest request) {
+-        // Idempotency: if already seen, return prior payment id.
+-        var existing = payments.findByIdempotencyKey(request.idempotencyKey());
+-        if (existing.isPresent()) {
+-            return new PaymentId(existing.get().id());
+-        }
++        // Serialize per idempotency-key. Without this, two concurrent
++        // submit() calls with the same key both race past
++        // findByIdempotencyKey (no row yet) and both try to save —
++        // the second insert violates payment.idempotency_key's unique
++        // index AND returns a different PaymentId, so the caller can't
++        // reconcile what actually happened. .intern() yields a process-
++        // wide stable monitor for equal strings.
++        synchronized (request.idempotencyKey().intern()) {
++            // Idempotency: if already seen, return prior payment id.
++            var existing = payments.findByIdempotencyKey(request.idempotencyKey());
++            if (existing.isPresent()) {
++                return new PaymentId(existing.get().id());
++            }
+ 
+-        enforceRailWindow(request.rail(), Timestamp.now(clock));
++            enforceRailWindow(request.rail(), Timestamp.now(clock));
+ 
+-        PaymentId id = PaymentId.newId();
+-        PaymentEntity entity = new PaymentEntity(
+-                id.value(),
+-                request.idempotencyKey(),
+-                request.rail(),
+-                request.originator().raw(),
+-                request.beneficiaryRouting().map(r -> r.raw()).orElse(null),
+-                request.beneficiaryAccount(),
+-                request.beneficiaryName(),
+-                request.amount().amount(),
+-                request.amount().currency(),
+-                request.requestedAt(),
+-                request.memo()
+-        );
+-        entity.validate();
+-        entity.submit(Timestamp.now(clock));
+-        payments.save(entity);
+-        return id;
++            PaymentId id = PaymentId.newId();
++            PaymentEntity entity = new PaymentEntity(
++                    id.value(),
++                    request.idempotencyKey(),
++                    request.rail(),
++                    request.originator().raw(),
++                    request.beneficiaryRouting().map(r -> r.raw()).orElse(null),
++                    request.beneficiaryAccount(),
++                    request.beneficiaryName(),
++                    request.amount().amount(),
++                    request.amount().currency(),
++                    request.requestedAt(),
++                    request.memo()
++            );
++            entity.validate();
++            entity.submit(Timestamp.now(clock));
++            payments.save(entity);
++            return id;
++        }
+     }
+ 
+     @Override

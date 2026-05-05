@@ -1,0 +1,110 @@
+diff --git a/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java b/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java
+new file mode 100644
+index 0000000..a453e2f
+--- /dev/null
++++ b/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java
+@@ -0,0 +1,104 @@
++package com.omnibank.payments.internal;
++
++import com.omnibank.payments.ach.AchCutoffPolicy;
++import com.omnibank.payments.api.PaymentId;
++import com.omnibank.payments.api.PaymentRail;
++import com.omnibank.payments.api.PaymentRequest;
++import com.omnibank.payments.wire.WireCutoffPolicy;
++import com.omnibank.shared.domain.AccountNumber;
++import com.omnibank.shared.domain.CurrencyCode;
++import com.omnibank.shared.domain.Money;
++import com.omnibank.shared.domain.RoutingNumber;
++import org.junit.jupiter.api.Test;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.ZoneId;
++import java.time.ZonedDateTime;
++import java.util.Optional;
++import java.util.UUID;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.CountDownLatch;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicReference;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.when;
++
++/**
++ * Hidden test for BUG-0008. Two concurrent submit() calls with the same
++ * idempotency key MUST return the same PaymentId — the bug is that the
++ * raced findByIdempotencyKey check + save creates two rows + returns
++ * two different ids, violating the at-least-one / at-most-one contract.
++ */
++class PaymentIdempotencyTest {
++
++    @Test
++    void concurrent_submit_with_same_idempotency_key_returns_same_payment_id() throws Exception {
++        // Real ConcurrentHashMap-backed "repository" simulating the
++        // unique-index constraint: putIfAbsent enforces at-most-one row
++        // per key. Mockito wraps it so PaymentServiceImpl interacts with
++        // the JpaRepository SPI shape it expects.
++        ConcurrentHashMap<String, PaymentEntity> byKey = new ConcurrentHashMap<>();
++        PaymentRepository repo = mock(PaymentRepository.class);
++        when(repo.findByIdempotencyKey(org.mockito.ArgumentMatchers.anyString()))
++            .thenAnswer(inv -> Optional.ofNullable(byKey.get(inv.getArgument(0, String.class))));
++        when(repo.save(org.mockito.ArgumentMatchers.any(PaymentEntity.class)))
++            .thenAnswer(inv -> {
++                PaymentEntity e = inv.getArgument(0, PaymentEntity.class);
++                PaymentEntity prior = byKey.putIfAbsent(e.idempotencyKey(), e);
++                if (prior != null) {
++                    throw new IllegalStateException(
++                        "duplicate idempotency_key: " + e.idempotencyKey());
++                }
++                return e;
++            });
++
++        // Cutoffs always open during the test window.
++        Clock open = Clock.fixed(
++            ZonedDateTime.of(2026, 4, 14, 11, 0, 0, 0, ZoneId.of("America/New_York")).toInstant(),
++            ZoneId.of("America/New_York"));
++        AchCutoffPolicy ach = new AchCutoffPolicy(open);
++        WireCutoffPolicy wire = new WireCutoffPolicy(open);
++        PaymentServiceImpl svc = new PaymentServiceImpl(repo, ach, wire, open);
++
++        String key = "IDEMPOTENT-XYZ-1";
++        PaymentRequest req = new PaymentRequest(
++            key, PaymentRail.BOOK,
++            AccountNumber.of("OB-C-A1B2C3D4"),
++            Optional.empty(),
++            "BENEFICIARY-1",
++            "Joe Bloggs",
++            Money.of(100L, CurrencyCode.USD),
++            "test memo",
++            Instant.now(open)
++        );
++
++        ExecutorService pool = Executors.newFixedThreadPool(2);
++        CountDownLatch start = new CountDownLatch(1);
++        AtomicReference<PaymentId> r1 = new AtomicReference<>();
++        AtomicReference<PaymentId> r2 = new AtomicReference<>();
++        AtomicReference<Throwable> err = new AtomicReference<>();
++        try {
++            pool.submit(() -> { try { start.await(); r1.set(svc.submit(req)); }
++                                catch (Throwable t) { err.compareAndSet(null, t); } });
++            pool.submit(() -> { try { start.await(); r2.set(svc.submit(req)); }
++                                catch (Throwable t) { err.compareAndSet(null, t); } });
++            start.countDown();
++            pool.shutdown();
++            assertThat(pool.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
++        } finally {
++            pool.shutdownNow();
++        }
++        assertThat(err.get())
++            .as("submit() raced past the idempotency check and tried to insert a duplicate row")
++            .isNull();
++        assertThat(r1.get()).isNotNull();
++        assertThat(r2.get()).isNotNull();
++        assertThat(r1.get()).isEqualTo(r2.get());
++        assertThat(byKey).hasSize(1);
++    }
++}

@@ -106,9 +106,20 @@ def main() -> None:
     bug_patch = git("diff",
                     f"{test_add_sha}..{regression_sha}",
                     cwd=omnibank)
-    verify_patch = git("diff",
-                       f"{base_sha}..{test_add_sha}",
-                       cwd=omnibank)
+    # verify.patch is the test-add commit's diff against base. Most
+    # omnibank bug branches' test-add commits only add a test file, but
+    # some (e.g. BUG-0008) bundle the production fix and the test in
+    # the same commit (then the regression undoes only the production
+    # part). Restrict verify.patch to TEST sources so the agent's
+    # production-code edit isn't silently overwritten by the gold fix
+    # at verify time. `--` followed by pathspecs scopes the diff.
+    verify_patch = git(
+        "diff",
+        f"{base_sha}..{test_add_sha}",
+        "--",
+        "*/src/test/**", "*/src/integrationTest/**",
+        cwd=omnibank,
+    )
 
     # Optional: capture the gold-standard fix for analysis (diff between
     # the regression commit and the corresponding /fix branch). If /fix

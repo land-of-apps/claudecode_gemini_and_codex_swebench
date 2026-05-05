@@ -1,0 +1,20 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture imported from omnibank's bug/BUG-0008/break branch via tools/import_omnibank_bug.py. language=java, host-side Gradle (no container).",
+  "language": "java",
+  "clean_upstream": "/Users/kgilpin/tmp/omnibank_snapshots/BUG-0008",
+  "bug_patch": "synth_bugs/omnibank_bug-0008/bug.patch",
+  "verify_patch": "synth_bugs/omnibank_bug-0008/verify.patch",
+  "verify_test_command": "./gradlew :payments-hub:test --tests 'PaymentIdempotencyTest.concurrent_submit_with_same_idempotency_key_returns_same_payment_id'",
+  "test_module": "payments-hub",
+  "test_class": "PaymentIdempotencyTest",
+  "test_method": "concurrent_submit_with_same_idempotency_key_returns_same_payment_id",
+  "fix_files": [
+    "payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java"
+  ],
+  "bug_summary": "BUG-0008: regression \u2014 drop per-key synchronized from submit()",
+  "source_branch": "refs/remotes/origin/bug/BUG-0008/break",
+  "source_commit_regression": "fe52ef53cbdc157e12b1c584ba4e78968932c93f",
+  "source_commit_test_add": "2267c2e8d4095c5e62b12f3e336195a0a5a3f4eb",
+  "source_commit_base": "fc9972aa0575efcfa0d0b6023c692a7a7fa5b5e9"
+}
