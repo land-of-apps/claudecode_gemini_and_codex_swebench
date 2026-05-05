@@ -199,25 +199,26 @@ def main():
     container_setup = _tw.dedent(fx.get("container_setup", "") or "")
 
     if is_java:
+        # Init script that pre-attaches the AppMap javaagent to all Test
+        # tasks. The plugin's own attachment runs in `appmap` task's
+        # doLast which is SKIPPED when any test fails — exactly the case
+        # we care about (bug-reproducing test must fail, otherwise the
+        # bug isn't planted). See tools/appmap-java-init.gradle for
+        # full notes.
+        appmap_init = REPO_ROOT / "tools" / "appmap-java-init.gradle"
+
         def _wrapper_script(record: bool) -> str:
-            # AppMap-Java's Gradle plugin records by inserting the
-            # `appmap` task before the test task. omnibank's
-            # build.gradle.kts gates plugin apply on `-Pappmap_enabled=true`,
-            # so the recording invocation is
-            #     ./gradlew -Pappmap_enabled=true appmap <test-task...>
-            # See https://appmap.io/docs/reference/appmap-gradle-plugin.html
-            #
-            # Output location: the plugin's DEFAULT_OUTPUT_DIRECTORY is
-            # "tmp/appmap" (per AppMapPluginExtension.java line 22), but
-            # that's resolved against each subproject's projectDirectory.
-            # In a multi-project build that means each subproject writes
-            # to <subproject>/tmp/appmap/, not the rootDir's tmp/appmap.
-            # The post-step below consolidates them into <rootDir>/tmp/
-            # appmap/junit/ — the canonical location our host-side watcher
-            # monitors. (`! -path './tmp/appmap/*'` excludes the root's
-            # own tmp/appmap to avoid recursion noise.)
             if record:
-                return _tw.dedent("""\
+                # --no-configuration-cache: the AppMap plugin's extension
+                # holds a java.util.logging.Logger that fails to serialize
+                # into Gradle's config cache.
+                # --init-script: pre-attaches the javaagent (see notes above).
+                # -Pappmap_enabled=true: omnibank's build.gradle.kts only
+                # applies the plugin when this flag is set.
+                # Recordings land at <subproject>/tmp/appmap/junit/*.appmap.json;
+                # the post-step copies them into <rootDir>/tmp/appmap/junit/
+                # (the canonical location the host-side watcher monitors).
+                return _tw.dedent(f"""\
                     #!/usr/bin/env bash
                     set -uo pipefail
                     if [[ $# -eq 0 ]]; then
@@ -226,12 +227,16 @@ def main():
                     fi
                     CLONE="$(cd "$(dirname "$0")/.." && pwd)"
                     cd "$CLONE"
-                    ./gradlew -Pappmap_enabled=true appmap "$@"
+                    ./gradlew \\
+                        --no-configuration-cache \\
+                        --init-script {_shlex.quote(str(appmap_init))} \\
+                        -Pappmap_enabled=true \\
+                        "$@"
                     status=$?
                     mkdir -p tmp/appmap/junit
                     find . -path '*/tmp/appmap/*.appmap.json' \\
                         ! -path './tmp/appmap/*' -print0 2>/dev/null \\
-                        | xargs -0 -I {} cp -p {} tmp/appmap/junit/ 2>/dev/null || true
+                        | xargs -0 -I {{}} cp -p {{}} tmp/appmap/junit/ 2>/dev/null || true
                     exit $status
                     """)
             return _tw.dedent("""\

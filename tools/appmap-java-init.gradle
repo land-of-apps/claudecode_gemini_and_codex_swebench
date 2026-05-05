@@ -1,0 +1,44 @@
+// Pre-attach the AppMap javaagent to all Test tasks unconditionally.
+//
+// The AppMap Gradle plugin's `appmap` task is itself a `Test` subclass
+// whose doLast attaches the javaagent to OTHER Test tasks via
+// LoadAppMapAgentAction. doLast actions are skipped when the task's
+// main body fails — and the appmap task's main body (running tests)
+// fails whenever any test fails. That breaks our use case: bug-fix
+// scenarios where the hidden test fails are exactly the ones we need
+// to record. Without this init script, no recordings would be
+// produced for any failing-test fixture.
+//
+// This script bypasses the plugin's failure-fragile attachment by
+// attaching the agent in an `afterEvaluate` block that runs whether
+// or not any task fails. It uses runtime class resolution (via
+// `extension.class.classLoader.loadClass(...)`) because gradle init
+// scripts don't have the plugin's classes on their compile-time
+// classpath.
+//
+// Apply with:  ./gradlew --init-script <this-file> -Pappmap_enabled=true :module:test ...
+//
+// Recordings land at <subproject>/tmp/appmap/junit/<class>_<method>.appmap.json
+// per AppMapPluginExtension.DEFAULT_OUTPUT_DIRECTORY ("tmp/appmap")
+// resolved against each subproject's projectDirectory.
+
+allprojects {
+    pluginManager.withPlugin("com.appland.appmap") { plugin ->
+        afterEvaluate {
+            tasks.withType(org.gradle.api.tasks.testing.Test).configureEach { t ->
+                if (t.class.simpleName == "AppMapTask") {
+                    return
+                }
+                def ext = t.project.extensions.findByName("appmap")
+                if (ext == null) {
+                    return
+                }
+                def cl = ext.class.classLoader
+                def loaderClass = cl.loadClass("com.appland.appmap.gradle.AgentCommandLineLoader")
+                def extClass = cl.loadClass("com.appland.appmap.gradle.AppMapPluginExtension")
+                def loader = loaderClass.getConstructor(extClass).newInstance(ext)
+                t.jvmArgumentProviders.add(loader)
+            }
+        }
+    }
+}

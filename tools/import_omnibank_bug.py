@@ -142,6 +142,24 @@ def main() -> None:
     if archive_proc.returncode != 0:
         sys.exit("git archive failed")
 
+    # Bug-branch base commits in omnibank predate the build's bump from
+    # Java 17 → 21, but the source uses Java 21 features (record patterns,
+    # qualified type patterns in switch). Without bumping, shared-domain
+    # fails to compile against the snapshot's stale toolchain. The fix is
+    # one line in build.gradle.kts. (Long-term solution: rebase bug
+    # branches onto current main, or rewrite this importer to overlay
+    # main's build.gradle.kts on top of the bug-branch source tree.)
+    bgk = snapshot_dir / "build.gradle.kts"
+    if bgk.is_file():
+        text = bgk.read_text()
+        bumped = text.replace(
+            "JavaLanguageVersion.of(17)",
+            "JavaLanguageVersion.of(21)",
+        )
+        if bumped != text:
+            bgk.write_text(bumped)
+            print(f"  toolchain bump:    Java 17 → Java 21 in {bgk.name}")
+
     # ---- write the fixture ---------------------------------------------
     fixture_dir = REPO_ROOT / "synth_bugs" / f"omnibank_{bug_id.lower()}"
     if fixture_dir.exists():
