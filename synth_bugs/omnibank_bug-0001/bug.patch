@@ -1,0 +1,12 @@
+diff --git a/payments-hub/src/main/java/com/omnibank/payments/ach/AchCutoffPolicy.java b/payments-hub/src/main/java/com/omnibank/payments/ach/AchCutoffPolicy.java
+index 9fb4cd6..d51df31 100644
+--- a/payments-hub/src/main/java/com/omnibank/payments/ach/AchCutoffPolicy.java
++++ b/payments-hub/src/main/java/com/omnibank/payments/ach/AchCutoffPolicy.java
+@@ -43,6 +43,6 @@ public final class AchCutoffPolicy {
+         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+             return false;
+         }
+-        return et.toLocalTime().isBefore(CUTOFF_FINAL_SAME_DAY);
++        return !et.toLocalTime().isAfter(CUTOFF_FINAL_SAME_DAY);
+     }
+ }
