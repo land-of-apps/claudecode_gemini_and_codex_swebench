@@ -460,22 +460,38 @@ def main():
             for line in verify_patch.read_text().splitlines():
                 if line.startswith("+++ b/"):
                     verify_targets.append(line[len("+++ b/"):].strip())
-            reverted = []
+            reverted, deleted = [], []
             for rel in verify_targets:
-                # Only revert files that were tracked at the synthetic
-                # base commit; verify.patch may also create new files.
+                # Two collision cases the agent can produce:
+                # 1. verify.patch MODIFIES an existing file (the file is
+                #    in HEAD). The agent may have edited the same file
+                #    (e.g. added a test method whose name collides with
+                #    the hidden one). Reset to HEAD before applying.
+                # 2. verify.patch CREATES a new file (not in HEAD). The
+                #    agent may have invented a test file at the same
+                #    path. `patch -p1` appends to existing files when
+                #    the diff says "new file" but the file is present —
+                #    producing malformed source with two package
+                #    declarations. Delete the agent's invention so the
+                #    patch creates a clean new file.
                 ls = subprocess.run(
                     ["git", "ls-tree", "--name-only", "HEAD", "--", rel],
                     cwd=str(repo_dir), capture_output=True, text=True,
                 )
+                full = repo_dir / rel
                 if ls.stdout.strip() == rel:
                     subprocess.run(
                         ["git", "checkout", "HEAD", "--", rel],
                         cwd=str(repo_dir), check=True, capture_output=True,
                     )
                     reverted.append(rel)
+                elif full.is_file():
+                    full.unlink()
+                    deleted.append(rel)
             if reverted:
                 print(f"\n--- reset agent edits to verify-patch targets: {reverted} ---")
+            if deleted:
+                print(f"\n--- deleted agent-created files at verify-patch new-file paths: {deleted} ---")
             print(f"--- applying verify.patch → {verify_patch.relative_to(REPO_ROOT)} ---")
             subprocess.run(
                 ["patch", "-p1", "-i", str(verify_patch)],
