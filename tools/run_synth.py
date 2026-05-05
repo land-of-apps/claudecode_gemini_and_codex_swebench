@@ -438,7 +438,33 @@ def main():
                                   f"synth_bugs/{args.fixture_id}/verify.patch")
         verify_patch = (REPO_ROOT / verify_patch_rel).resolve()
         if verify_patch.is_file():
-            print(f"\n--- applying verify.patch → {verify_patch.relative_to(REPO_ROOT)} ---")
+            # Revert agent edits to any file verify.patch touches.
+            # The agent may have added its own test method whose name
+            # collides with the hidden test (causing a duplicate-
+            # definition compile error in Java, or a redefinition
+            # warning in Python). The agent's PRODUCTION edits live in
+            # other files and are preserved by this reset.
+            verify_targets = []
+            for line in verify_patch.read_text().splitlines():
+                if line.startswith("+++ b/"):
+                    verify_targets.append(line[len("+++ b/"):].strip())
+            reverted = []
+            for rel in verify_targets:
+                # Only revert files that were tracked at the synthetic
+                # base commit; verify.patch may also create new files.
+                ls = subprocess.run(
+                    ["git", "ls-tree", "--name-only", "HEAD", "--", rel],
+                    cwd=str(repo_dir), capture_output=True, text=True,
+                )
+                if ls.stdout.strip() == rel:
+                    subprocess.run(
+                        ["git", "checkout", "HEAD", "--", rel],
+                        cwd=str(repo_dir), check=True, capture_output=True,
+                    )
+                    reverted.append(rel)
+            if reverted:
+                print(f"\n--- reset agent edits to verify-patch targets: {reverted} ---")
+            print(f"--- applying verify.patch → {verify_patch.relative_to(REPO_ROOT)} ---")
             subprocess.run(
                 ["patch", "-p1", "-i", str(verify_patch)],
                 cwd=str(repo_dir), check=True, capture_output=True,
@@ -489,12 +515,15 @@ def main():
     test_output = proc.stdout
     print(test_output)
 
-    # Detect pass/fail from the LAST pytest summary banner (a line of
-    # equals signs surrounding e.g. "1 passed in 4.03s" or
-    # "1 failed, 2 passed in 5.10s"). Substring-matching the whole
-    # output is brittle: a test name like
-    # `test_payment_error_branch_thaws_frozen_basket` makes the word
-    # "error" appear unrelated to any actual error.
+    # Detect pass/fail.
+    #   pytest:   LAST line of the form "==== 1 passed in 4.03s ====". A
+    #             plain substring match is too eager — a test named
+    #             `test_payment_error_branch_thaws_frozen_basket` would
+    #             plant the word "error" in unrelated banners.
+    #   unittest: "OK" present, "FAIL" absent.
+    #   gradle:   "BUILD SUCCESSFUL" present, "FAILED" absent (gradle
+    #             prints "BUILD FAILED" + "> Task :foo:test FAILED" on
+    #             test failure).
     import re as _re
     summary_lines = _re.findall(
         r'^=+\s+(.+?)\s+=+\s*$', test_output, flags=_re.MULTILINE,
@@ -506,7 +535,12 @@ def main():
         and 'error' not in final_summary
     )
     unittest_pass = "OK" in test_output and "FAIL" not in test_output
-    passed = pytest_pass or unittest_pass
+    gradle_pass = (
+        "BUILD SUCCESSFUL" in test_output
+        and "BUILD FAILED" not in test_output
+        and "FAILED" not in test_output
+    ) if is_java else False
+    passed = pytest_pass or unittest_pass or gradle_pass
     verdict = {
         "fixture_id": args.fixture_id,
         "backend": args.backend,
