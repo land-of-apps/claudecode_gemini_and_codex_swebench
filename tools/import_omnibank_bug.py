@@ -88,6 +88,19 @@ def main() -> None:
     if "hidden" not in test_add_msg.lower() and "test" not in test_add_msg.lower():
         print(f"  WARNING: test-add commit message looks unusual — review.",
               file=sys.stderr)
+    # Hard fail on mis-stacked branches. omnibank's BUG-0002, for
+    # example, is a regression on top of BUG-0001's test-add — there
+    # is no BUG-0002-specific hidden test. Without this check the
+    # importer pairs the wrong bug with the wrong test (Money.java
+    # regression + AchCutoffPolicyTest test) and produces a fixture
+    # that cannot fail-then-pass meaningfully.
+    if not test_add_msg.startswith(f"{bug_id}:"):
+        sys.exit(
+            f"ERROR: test-add commit '{test_add_msg}' does not belong to "
+            f"{bug_id}. The bug branch appears mis-stacked — there is no "
+            f"{bug_id}-specific hidden test commit on `bug/{bug_id}/break`. "
+            f"Skip this bug or author a hidden test commit upstream first."
+        )
 
     # ---- generate the patches ------------------------------------------
     bug_patch = git("diff",
