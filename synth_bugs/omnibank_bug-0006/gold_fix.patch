@@ -1,0 +1,13 @@
+diff --git a/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/LoanStatus.java b/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/LoanStatus.java
+index 07e6fbc..f6d0945 100644
+--- a/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/LoanStatus.java
++++ b/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/LoanStatus.java
+@@ -22,7 +22,7 @@ public enum LoanStatus {
+         return switch (this) {
+             case APPLICATION -> next == UNDERWRITING || next == DECLINED;
+             case UNDERWRITING -> next == APPROVED || next == DECLINED;
+-            case APPROVED -> next == FUNDED || next == ACTIVE || next == DECLINED;
++            case APPROVED -> next == FUNDED || next == DECLINED;
+             case FUNDED -> next == ACTIVE;
+             case ACTIVE -> next == DELINQUENT || next == PAID_OFF || next == RESTRUCTURED;
+             case DELINQUENT -> next == ACTIVE || next == NON_ACCRUAL || next == RESTRUCTURED;

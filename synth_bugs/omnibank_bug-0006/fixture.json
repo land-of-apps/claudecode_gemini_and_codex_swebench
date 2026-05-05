@@ -1,0 +1,20 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture imported from omnibank's bug/BUG-0006/break branch via tools/import_omnibank_bug.py. language=java, host-side Gradle (no container).",
+  "language": "java",
+  "clean_upstream": "/Users/kgilpin/tmp/omnibank_snapshots/BUG-0006",
+  "bug_patch": "synth_bugs/omnibank_bug-0006/bug.patch",
+  "verify_patch": "synth_bugs/omnibank_bug-0006/verify.patch",
+  "verify_test_command": "./gradlew :lending-corporate:test --tests 'LoanStatusTest.approved_cannot_go_directly_to_active'",
+  "test_module": "lending-corporate",
+  "test_class": "LoanStatusTest",
+  "test_method": "approved_cannot_go_directly_to_active",
+  "fix_files": [
+    "lending-corporate/src/main/java/com/omnibank/lending/corporate/api/LoanStatus.java"
+  ],
+  "bug_summary": "BUG-0006: regression \u2014 APPROVED \u2192 ACTIVE skip-FUNDED transition allowed",
+  "source_branch": "refs/remotes/origin/bug/BUG-0006/break",
+  "source_commit_regression": "54c21f5d58af9e9cc7a5e0c0441d1bb4cbe2d36c",
+  "source_commit_test_add": "41314b52041218564f46336893a990ced26c9a7d",
+  "source_commit_base": "589d94dad845317701d3b3d973e499b5523f60c1"
+}
