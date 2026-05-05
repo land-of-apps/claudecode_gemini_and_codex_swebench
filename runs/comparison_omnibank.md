@@ -16,6 +16,7 @@ backend strategy. Model: `claude-opus-4-7`.
 | BUG-0005 | ✅ pass* | ✅ pass* (triage) | available-balance midnight-reset on same-day hold expiries. Both reverted to `h.isActive(now)` in ConsumerAccountServiceImpl.activeHoldsTotal — exactly the gold fix. Original verify.patch referenced `ConsumerProduct.CHECKING` (does not exist; enum has `CHECKING_BASIC` / `CHECKING_PREMIUM`). Original bug.patch shipped with a `// Bug: LocalDate-level...` developer-comment leak that made triage trivial. Both fixed upstream (force-pushed `bug/BUG-0005/break`); fixture re-imported. (* verdict.json files in 20260505_1617... still show passed=False against the original broken assertion; manual replay + clean re-import confirm both agents pass.) |
 | BUG-0006 | ✅ pass | ✅ pass (triage) | Loan state machine APPROVED → ACTIVE skip-FUNDED. Both edited only LoanStatus.java, removing `next == ACTIVE` from the APPROVED case. RCA: "single named identifier (`canTransitionTo` / `LoanStatus`) in a clearly-named layer (lending-corporate state machine) maps directly to a 3-line fix." |
 | BUG-0007 | ✅ pass | ✅ pass (triage) | Final amortization installment doesn't absorb the rounding residual. Both edited AmortizationCalculator.java to restore the `if (i == periods) { dump remaining balance } else { ... }` branch. RCA pointed at the Javadoc that explicitly documents the missing behavior — "the last installment absorbs the cumulative rounding so the closing balance lands exactly at zero." Static evidence is sufficient because the spec is in-source. |
+| BUG-0008 | ⚠ ambiguous | ⚠ ambiguous (**full RCA + recording**) | **First fixture to exercise the recording path end-to-end with the agent driving.** RCA report_type: full; subagent ran `find_recordings`, `find_calls`, `get_call_tree` and produced a sophisticated analysis: "the lock release happens BEFORE @Transactional commits, leaving a window where a second thread inside the lock sees pre-A state — the lock must enclose the transaction, not the other way around." Three layered confounds make the verdict ambiguous: (1) **Vanilla's `git diff HEAD` was empty** (patch_chars=0) despite the file containing the correct synchronized block — the agent amended HEAD via `git commit --amend` somewhere in its workflow, bypassing patch extraction. The verify ran against HEAD's amended state and passed. (2) **The hidden test is timing-flaky** — a no-op patch also passes when JVM scheduling lines threads up sequentially (which is what we got with vanilla's empty patch). (3) **3-step's fix changed the constructor signature** to add `@Lazy PaymentServiceImpl self` for a more correct outside-@Transactional locking pattern; correct in production, but breaks the test's `new PaymentServiceImpl(repo, ach, wire, open)` instantiation → compileTestJava fails. Net: both backends recognized the bug, vanilla's fix was extracted-broken, 3-step's fix was over-engineered relative to the test contract. The data point is most valuable as **harness/fixture feedback**, not as a clean win/loss. |
 
 ## Recording-pipeline evidence
 
@@ -45,22 +46,34 @@ runtime-ambiguous bugs.
 
 ## Open questions / parking lot
 
-- We haven't yet exercised the **RCA recording path** on Java end-
-  to-end — every omnibank fixture so far (5 imported, 4 evaluated)
-  has resolved via triage. Look for a more diffuse bug as we work
-  through BUG-0006..0012, or author one against omnibank
-  specifically.
+- ~~RCA recording path on Java unexercised~~ — **done** in BUG-0008,
+  RCA used MCP queries against a fresh recording and produced a
+  Spring-aware analysis.
+- ~~Strip `// Bug:` comments upstream~~ — **done** for BUG-0005;
+  full survey shows that was the only affected bug.
+- ~~Compile gate on import~~ — **done**; importer now runs
+  `compileTestJava` on snapshot+verify.patch and refuses to
+  produce a broken fixture.
+- **HEAD-amend bypass of patch extraction.** BUG-0008 vanilla
+  amended the synthetic HEAD commit during its workflow, leaving
+  `git diff HEAD` empty even though the file contained the
+  correct fix. Either detect amends (`git log` count > 1 vs
+  expected, or compare to recorded base SHA) and warn, or capture
+  pre-agent state via a different mechanism (separate ref).
+- **Timing-flaky concurrency tests.** BUG-0008's hidden test
+  passes both with the bug present (when threads happen to
+  serialize on JVM scheduling) and with the fix. A robust version
+  needs to deterministically interleave — e.g. a save-side
+  CountDownLatch that gates thread A's save until thread B has
+  reached the lookup. Until then the test gives ~50/50 noise on a
+  bug it should always catch.
+- **Gold-fix correctness under @Transactional.** RCA in BUG-0008
+  flagged that the gold fix's `synchronized` inside an
+  `@Transactional` method releases the lock before commit and
+  doesn't actually serialize the lookup-vs-commit window. The
+  hidden test asserts the gold-fix shape, so a more correct
+  outside-@Transactional fix (3-step's choice) gets penalized.
+  The fix branch upstream may itself need re-evaluation.
 - Test-fairness check: review verify.patch assertions on each
   imported bug for the same kind of brittleness BUG-0003 had
   (literal enum names, exact stack traces, etc).
-- Validate verify.patch *compiles* against its snapshot during
-  import — BUG-0005's `ConsumerProduct.CHECKING` references a non-
-  existent enum constant. The importer should `javac`-check the
-  hidden-test source against the snapshot or otherwise refuse to
-  produce a fixture whose verify.patch can't compile.
-- bug.patch comment leakage: BUG-0005's regression diff includes
-  a `// Bug: LocalDate-level isBefore excludes...` comment in the
-  source. Both agents (and the RCA) trivially located the bug by
-  grep'ing for that comment. The omnibank bug-branch authoring
-  convention should strip such comments before generating the
-  break diff.
