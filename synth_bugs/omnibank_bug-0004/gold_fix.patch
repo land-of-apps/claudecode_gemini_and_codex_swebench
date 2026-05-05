@@ -1,0 +1,12 @@
+diff --git a/shared-domain/src/main/java/com/omnibank/shared/domain/DayCountConvention.java b/shared-domain/src/main/java/com/omnibank/shared/domain/DayCountConvention.java
+index 36f8d8f..7129b6c 100644
+--- a/shared-domain/src/main/java/com/omnibank/shared/domain/DayCountConvention.java
++++ b/shared-domain/src/main/java/com/omnibank/shared/domain/DayCountConvention.java
+@@ -24,7 +24,6 @@ public enum DayCountConvention {
+             int d1 = Math.min(30, start.getDayOfMonth());
+             int d2 = end.getDayOfMonth();
+             if (d1 == 30 && d2 == 31) d2 = 30;
+-            if (end.getMonth() == java.time.Month.FEBRUARY && (d2 == 28 || d2 == 29)) d2 = 30;
+             int days = 360 * (end.getYear() - start.getYear())
+                     + 30 * (end.getMonthValue() - start.getMonthValue())
+                     + (d2 - d1);
