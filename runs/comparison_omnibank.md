@@ -12,6 +12,7 @@ backend strategy. Model: `claude-opus-4-7`.
 | BUG-0001 | ✅ pass | ✅ pass (triage) | Bug names "16:45" → RCA correctly took triage path. |
 | BUG-0002 | — | — | Skipped: omnibank branch is mis-stacked (no BUG-0002-specific test commit). Importer fails fast. |
 | BUG-0003 | ✅ pass | ✅ pass (triage) | Both edited PostingException.java + PostingServiceImpl.java, introducing a new `CURRENCY_MISMATCH` enum (semantically distinct from the existing `MIXED_CURRENCIES` reason). RCA report explicitly justified the new enum. Originally both runs FAILED because verify.patch asserted `hasMessageContaining("MIXED_CURRENCIES")` — pinned to the gold solution's preserved-conflation choice. Relaxed assertion to `hasMessageContaining("CURRENC")` accepts either enum name; both runs pass. **No real recording needed for this bug** — triage-path is the right call. |
+| BUG-0004 | ✅ pass | ✅ pass (triage) | 30/360 day-count convention. Both edited only DayCountConvention.java, removing the spurious Feb-28/29 → 30 snap. Vanilla initially failed because the agent invented its own DayCountConventionTest.java; verify.patch's "new file mode 100644" diff appended to the agent's file producing two `package` declarations and 6 compile errors. Harness now deletes agent-created files at verify-patch new-file paths before applying. |
 
 ## Recording-pipeline evidence
 
