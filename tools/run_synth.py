@@ -398,9 +398,23 @@ def main():
     proc = subprocess.run(verify_cmd, capture_output=True, text=True)
     test_output = proc.stdout
     print(test_output)
-    # pytest: "N passed" + no "failed"/"error". unittest: "OK" + no "FAIL".
-    pytest_pass = ("passed" in test_output and "failed" not in test_output
-                   and "error" not in test_output.lower().split("warnings")[0])
+
+    # Detect pass/fail from the LAST pytest summary banner (a line of
+    # equals signs surrounding e.g. "1 passed in 4.03s" or
+    # "1 failed, 2 passed in 5.10s"). Substring-matching the whole
+    # output is brittle: a test name like
+    # `test_payment_error_branch_thaws_frozen_basket` makes the word
+    # "error" appear unrelated to any actual error.
+    import re as _re
+    summary_lines = _re.findall(
+        r'^=+\s+(.+?)\s+=+\s*$', test_output, flags=_re.MULTILINE,
+    )
+    final_summary = summary_lines[-1] if summary_lines else ''
+    pytest_pass = (
+        'passed' in final_summary
+        and 'failed' not in final_summary
+        and 'error' not in final_summary
+    )
     unittest_pass = "OK" in test_output and "FAIL" not in test_output
     passed = pytest_pass or unittest_pass
     verdict = {
