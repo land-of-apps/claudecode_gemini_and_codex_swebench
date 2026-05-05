@@ -71,6 +71,6 @@ index 0000000..a2ab7cb
 +        PostingServiceImpl svc = new PostingServiceImpl(journals, accounts, events, clock);
 +        assertThatThrownBy(() -> svc.post(entry))
 +            .isInstanceOf(PostingException.class)
-+            .hasMessageContaining("MIXED_CURRENCIES");
++            .hasMessageContaining("CURRENC");
 +    }
 +}

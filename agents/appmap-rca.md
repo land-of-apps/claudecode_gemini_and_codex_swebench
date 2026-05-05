@@ -39,6 +39,13 @@ this bug needs:
   apply when only one should") without naming a code identifier.
   Proceed with the full workflow below.
 
+  Choosing the full path **commits you to recording**. The whole
+  point of this subagent is to ground RCA in runtime evidence
+  rather than static reasoning. If you find yourself thinking "I
+  can solve this from grep + Read without recording," that's the
+  triage path — switch reports. There is no middle ground where
+  `report_type: full` skips recording.
+
 When in doubt, prefer the full RCA path. A misrouted triage costs
 the caller a wrong-target edit and a failed verify; a redundant
 full RCA only costs the difference in subagent tokens.
@@ -59,9 +66,10 @@ The caller will give you:
 
 1. **`find_recordings` first.** Always. If something matches the bug
    keywords, you have a recording — skip steps 2–3.
-2. **Reset `appmap.yml` to a minimal config before recording.**
-   Detect the project language from build files (`pyproject.toml` /
-   `setup.py` → python; `build.gradle*` / `pom.xml` → java) and write:
+2. **Reset `appmap.yml` to a minimal config.** Always, on the full
+   path — even if `find_recordings` found something. Detect the
+   project language from build files (`pyproject.toml` / `setup.py`
+   → python; `build.gradle*` / `pom.xml` → java) and write:
 
    ```yaml
    name: <project-name>
@@ -79,10 +87,15 @@ The caller will give you:
    (see step 6). Inheriting whatever scope a previous developer
    configured floods the recording with unrelated calls and slows
    every MCP query.
-3. **If no recording: reproduce once.** Write the smallest reproducer
-   that triggers the failure (a pytest test or a `manage.py shell`
-   script). Run it under `bin/record-appmap.sh`. One focused
-   recording beats ten broad ones.
+3. **Reproduce + record.** Required on the full path. Write the
+   smallest reproducer that triggers the failure (a pytest test or
+   a `manage.py shell` script for Python; a JUnit method or
+   `bin/record-appmap.sh :module:test --tests ...` invocation for
+   Java). One focused recording beats ten broad ones. If
+   `find_recordings` already returned something keyed to the bug
+   keywords, you may use it instead of producing a new one — but
+   only if it was made AFTER your appmap.yml reset (otherwise the
+   scope is stale).
 4. **Query narrowly.** `find_calls` to locate the function on the
    failing path. `get_call_tree` for structure; default depth
    `parent=1, child=1`. If you get an "exceeds maximum" error,
