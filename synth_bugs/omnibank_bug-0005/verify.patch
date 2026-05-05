@@ -58,7 +58,7 @@ index 0000000..93dca8c
 +
 +        AccountNumber acct = AccountNumber.of("OB-C-A1B2C3D4");
 +        ConsumerAccountEntity entity = new ConsumerAccountEntity(
-+            acct.raw(), UUID.randomUUID(), ConsumerProduct.CHECKING,
++            acct.raw(), UUID.randomUUID(), ConsumerProduct.CHECKING_BASIC,
 +            CurrencyCode.USD, LocalDate.of(2024, 1, 1), null);
 +        entity.activate();
 +
