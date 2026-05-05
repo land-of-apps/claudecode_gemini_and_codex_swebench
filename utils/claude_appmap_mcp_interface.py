@@ -240,9 +240,18 @@ class ClaudeAppMapMcpInterface:
         v2 entry point (run_synth + clean_upstream + bug_patch) lets
         run_synth git-init the whole tree at once after this returns.
         """
-        (clone / "appmap.yml").write_text(self._appmap_yml(instance))
+        # Preserve project-shipped appmap.yml (e.g. omnibank's, which
+        # configures Java packages) and any issue.md the v2 fixture
+        # already wrote. Default-clobbering them was producing empty
+        # AppMap recordings on Java fixtures because the language: java
+        # config got replaced by the iface's language: python default.
+        appmap_yml = clone / "appmap.yml"
+        if not appmap_yml.exists():
+            appmap_yml.write_text(self._appmap_yml(instance))
         (clone / ".mcp.json").write_text(self._mcp_json())
-        (clone / "issue.md").write_text(self._issue_md(instance))
+        issue_md = clone / "issue.md"
+        if not issue_md.exists():
+            issue_md.write_text(self._issue_md(instance))
         (clone / "CLAUDE.md").write_text(self._claude_md())
         (clone / "tmp" / "appmap").mkdir(parents=True, exist_ok=True)
         bin_dir = clone / "bin"

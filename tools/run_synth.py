@@ -333,6 +333,18 @@ def main():
         # `git log` reveals nothing about the fixture identity.
         subprocess.run(["git", "init", "-q", "-b", "main"],
                        cwd=str(repo_dir), env=git_env, check=True)
+        # AppMap's java agent calls GitUtil.getRepositoryURL() during
+        # metadata write and does an unguarded `list.get(0)` on the
+        # remote list. With no remote configured the test crashes mid-
+        # recording (java.lang.IndexOutOfBoundsException) and the
+        # whole gradle build fails. A placeholder local remote makes
+        # the list non-empty without leaking any external URL.
+        subprocess.run(
+            ["git", "remote", "add", "origin",
+             "file:///dev/null/synth.git"],
+            cwd=str(repo_dir), env=git_env, check=True,
+            capture_output=True,
+        )
         subprocess.run(["git", "add", "-A"],
                        cwd=str(repo_dir), env=git_env, check=True,
                        capture_output=True)
