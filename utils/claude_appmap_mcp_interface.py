@@ -29,6 +29,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import textwrap
 import uuid
 from pathlib import Path
@@ -240,14 +241,19 @@ class ClaudeAppMapMcpInterface:
         v2 entry point (run_synth + clean_upstream + bug_patch) lets
         run_synth git-init the whole tree at once after this returns.
         """
-        # Preserve project-shipped appmap.yml (e.g. omnibank's, which
-        # configures Java packages) and any issue.md the v2 fixture
-        # already wrote. Default-clobbering them was producing empty
-        # AppMap recordings on Java fixtures because the language: java
-        # config got replaced by the iface's language: python default.
-        appmap_yml = clone / "appmap.yml"
-        if not appmap_yml.exists():
-            appmap_yml.write_text(self._appmap_yml(instance))
+        # appmap.yml is the project's responsibility — Python and Java
+        # AppMap agents both emit a usable default at record time when
+        # none exists, so the iface should never create one. We do flag
+        # the absence as a heads-up: empty package configs on Java
+        # produce 0-event recordings, and on Python you lose
+        # project-specific includes.
+        if not (clone / "appmap.yml").exists():
+            print(
+                "  WARNING: appmap.yml missing — relying on the recording "
+                "agent's built-in default. For Java this typically means "
+                "no packages instrumented (recordings will be empty).",
+                file=sys.stderr,
+            )
         (clone / ".mcp.json").write_text(self._mcp_json())
         issue_md = clone / "issue.md"
         if not issue_md.exists():
@@ -400,16 +406,22 @@ class ClaudeAppMapMcpInterface:
 
     @staticmethod
     def _commit_scaffolding(clone: Path) -> None:
-        """Commit appmap.yml/.mcp.json/issue.md/bin/record-appmap.sh/.gitignore
-        as a new HEAD. patch_extractor.py uses `git diff HEAD`, so anything
-        already in HEAD won't appear in the predicted patch."""
+        """Commit .mcp.json/issue.md/CLAUDE.md/bin/*/  .gitignore as a new
+        HEAD. patch_extractor.py uses `git diff HEAD`, so anything already
+        in HEAD won't appear in the predicted patch.
+
+        appmap.yml is intentionally NOT in this list — it's project-owned,
+        and the recording agents emit a default at record time when none
+        exists. If the project ships its own appmap.yml, it landed in the
+        clean upstream commit before this scaffolding commit, so it's
+        already in HEAD."""
         env = {**os.environ,
                "GIT_AUTHOR_NAME": "claude-appmap",
                "GIT_AUTHOR_EMAIL": "appmap@example.invalid",
                "GIT_COMMITTER_NAME": "claude-appmap",
                "GIT_COMMITTER_EMAIL": "appmap@example.invalid"}
         subprocess.run(
-            ["git", "add", "-A", "appmap.yml", ".mcp.json", "issue.md",
+            ["git", "add", "-A", ".mcp.json", "issue.md",
              "CLAUDE.md", "bin/record-appmap.sh", "bin/run-tests.sh",
              ".gitignore"],
             cwd=str(clone), env=env, capture_output=True,
@@ -417,32 +429,6 @@ class ClaudeAppMapMcpInterface:
         subprocess.run(
             ["git", "commit", "--no-verify", "-m", "claude-appmap: scaffolding"],
             cwd=str(clone), env=env, capture_output=True,
-        )
-
-    @staticmethod
-    def _appmap_yml(instance: Dict) -> str:
-        """Minimal default. NO `packages:` section — the agent decides whether
-        to add one.
-
-        With no packages, AppMap-Python still records HTTP requests, SQL
-        queries, exceptions, and any function bearing a built-in canonical
-        label (`log`, `secret`, `security.*`, etc). That's usually enough to
-        orient. Adding broad `packages:` (e.g. `path: .`) up-front floods the
-        recording with thousands of intra-framework calls and forces every
-        MCP query to filter through them. The appmap-fix skill instructs the
-        agent to add packages one at a time, only when the built-ins prove
-        insufficient."""
-        name = instance.get("repo", "project").replace("/", "__")
-        return textwrap.dedent(
-            f"""\
-            name: {name}
-            language: python
-            appmap_dir: tmp/appmap
-            # packages: intentionally empty. Built-in instrumentation captures
-            # HTTP requests, SQL, exceptions, and labeled functions. Add a
-            # package here only when those built-ins haven't surfaced enough
-            # detail — and add ONE at a time (mark adjacent deps `shallow: true`).
-            """
         )
 
     @staticmethod
