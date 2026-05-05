@@ -1,0 +1,83 @@
+diff --git a/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
+new file mode 100644
+index 0000000..93dca8c
+--- /dev/null
++++ b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
+@@ -0,0 +1,77 @@
++package com.omnibank.accounts.consumer.internal;
++
++import com.omnibank.accounts.consumer.api.BalanceView;
++import com.omnibank.accounts.consumer.api.ConsumerProduct;
++import com.omnibank.ledger.api.LedgerQueries;
++import com.omnibank.ledger.api.PostingService;
++import com.omnibank.shared.domain.AccountNumber;
++import com.omnibank.shared.domain.CurrencyCode;
++import com.omnibank.shared.domain.Money;
++import com.omnibank.shared.messaging.EventBus;
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDate;
++import java.time.ZoneId;
++import java.time.ZonedDateTime;
++import java.util.List;
++import java.util.Optional;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.mockito.ArgumentMatchers.any;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.when;
++
++/**
++ * Hidden test for BUG-0005. Validates that
++ * ConsumerAccountServiceImpl.balance(...) treats a hold expiring later
++ * the SAME calendar day as still-active — `available` must subtract it
++ * from the ledger balance. The bug was a LocalDate-level isBefore
++ * filter that excluded same-day expiries.
++ */
++class BalanceHoldFilterTest {
++
++    @Test
++    void available_balance_includes_hold_expiring_later_today() {
++        ZoneId ET = ZoneId.of("America/New_York");
++        // "Now" is 9 AM ET. A hold expiring 5 PM ET today should still
++        // be active and reduce available by its amount.
++        Instant nowInst = ZonedDateTime.of(2026, 4, 30, 9, 0, 0, 0, ET).toInstant();
++        Instant expiresLaterToday =
++            ZonedDateTime.of(2026, 4, 30, 17, 0, 0, 0, ET).toInstant();
++
++        ConsumerAccountRepository accounts = mock(ConsumerAccountRepository.class);
++        HoldRepository holds = mock(HoldRepository.class);
++        PostingService posting = mock(PostingService.class);
++        LedgerQueries ledger = mock(LedgerQueries.class);
++        EventBus events = mock(EventBus.class);
++        Clock clock = Clock.fixed(nowInst, ET);
++
++        AccountNumber acct = AccountNumber.of("OB-C-A1B2C3D4");
++        ConsumerAccountEntity entity = new ConsumerAccountEntity(
++            acct.raw(), UUID.randomUUID(), ConsumerProduct.CHECKING,
++            CurrencyCode.USD, LocalDate.of(2024, 1, 1), null);
++        entity.activate();
++
++        HoldEntity stillActive = new HoldEntity(
++            UUID.randomUUID(), acct.raw(),
++            BigDecimal.valueOf(50.00), CurrencyCode.USD,
++            "test", nowInst.minusSeconds(3600), expiresLaterToday);
++
++        when(accounts.findById(acct.raw())).thenReturn(Optional.of(entity));
++        when(holds.findByAccountNumberAndReleasedAtIsNull(acct.raw()))
++            .thenReturn(List.of(stillActive));
++        when(ledger.currentBalance(any())).thenReturn(Money.of(200L, CurrencyCode.USD));
++
++        ConsumerAccountServiceImpl svc = new ConsumerAccountServiceImpl(
++            accounts, holds, posting, ledger, events, clock);
++
++        BalanceView view = svc.balance(acct);
++        // Ledger 200, hold 50 — available must reflect the hold.
++        assertThat(view.available().amount()).isEqualByComparingTo("150.00");
++        assertThat(view.pending().amount()).isEqualByComparingTo("50.00");
++    }
++}

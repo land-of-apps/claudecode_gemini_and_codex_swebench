@@ -1,0 +1,20 @@
+diff --git a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
+index bdc8985..cccac5b 100644
+--- a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
++++ b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
+@@ -110,13 +110,11 @@ public class ConsumerAccountServiceImpl implements ConsumerAccountService {
+     }
+ 
+     private Money activeHoldsTotal(AccountNumber account, com.omnibank.shared.domain.CurrencyCode ccy) {
+-        LocalDate today = LocalDate.now(clock);
++        Instant now = Timestamp.now(clock);
+         List<HoldEntity> active = holds.findByAccountNumberAndReleasedAtIsNull(account.raw());
+         Money total = Money.zero(ccy);
+         for (HoldEntity h : active) {
+-            // Bug: LocalDate-level isBefore excludes holds expiring later today.
+-            LocalDate exp = h.expiresAt().atZone(java.time.ZoneOffset.UTC).toLocalDate();
+-            if (today.isBefore(exp)) {
++            if (h.isActive(now)) {
+                 total = total.plus(Money.of(h.amount(), h.currency()));
+             }
+         }
