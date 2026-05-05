@@ -97,13 +97,17 @@ def main():
     fx = json.loads(fx_path.read_text())
     issue_md = (fixture_dir / "issue.md").read_text()
 
-    if not os.environ.get("DOCKER_HOST"):
+    # ---- format detection -----------------------------------------------
+    is_v2 = "clean_upstream" in fx
+    language = fx.get("language", "python")
+    is_java = (language == "java")
+
+    # Container plumbing only matters for the python flow. Java runs
+    # host-side via the project's gradle wrapper — no podman, no DOCKER_HOST.
+    if not is_java and not os.environ.get("DOCKER_HOST"):
         host = discover_docker_host()
         if host:
             os.environ["DOCKER_HOST"] = host
-
-    # ---- format detection -----------------------------------------------
-    is_v2 = "clean_upstream" in fx
 
     # Per-run dir (resolved before the copy so we can emit log lines).
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -174,34 +178,94 @@ def main():
     resolved_model = get_model_name(args.model, args.backend) if args.model else None
     instance["_resolved_model"] = resolved_model
 
-    # Build the per-fixture container wrappers. Both bin/run-tests.sh
-    # (no instrumentation) and, for appmap backends, bin/record-appmap.sh
-    # (instrumented) — same container, same setup, only the wrap differs.
+    # Build the per-fixture wrappers — bin/run-tests.sh (no instrumentation)
+    # and bin/record-appmap.sh (instrumented). Two language flavors:
+    #
+    #   python: each wrapper is a `podman run` against a SWE-bench-style
+    #           container image, with the agent's clone bind-mounted in.
+    #   java:   each wrapper is a host-side `./gradlew` invocation against
+    #           the project's gradle wrapper. -Pappmap_enabled=true on
+    #           record-appmap.sh activates the AppMap Gradle plugin which
+    #           emits .appmap.json under tmp/appmap/junit/.
+    #
+    # The interfaces (claude_appmap_mcp_interface, claude_appmap_3step_
+    # interface) call _record_script and _run_tests_script when laying
+    # down scaffolding; we override both via the iface._record_script /
+    # _run_tests_script lambdas below.
     import shlex as _shlex, textwrap as _tw
 
-    image = fx["instance_image"]
+    image = fx.get("instance_image")  # python only; None for java
     mount_path = fx.get("container_mount", "/app")
     container_setup = _tw.dedent(fx.get("container_setup", "") or "")
 
-    def _wrapper_script(extra_inner: str) -> str:
-        inner = container_setup + "\n" + extra_inner
-        return _tw.dedent(f"""\
-            #!/usr/bin/env bash
-            set -euo pipefail
-            if [[ $# -eq 0 ]]; then
-              echo "usage: $0 <test-command...>" >&2
-              exit 2
-            fi
-            CLONE="$(cd "$(dirname "$0")/.." && pwd)"
-            exec podman run --rm \\
-                -v "$CLONE":{_shlex.quote(mount_path)} \\
-                -w {_shlex.quote(mount_path)} \\
-                -e DATABASE_ENGINE=django.db.backends.sqlite3 \\
-                -e DATABASE_NAME=:memory: \\
-                -e PYTHONPATH={_shlex.quote(mount_path)}/src \\
-                {_shlex.quote(image)} \\
-                bash -lc {_shlex.quote(inner)} _wrap "$@"
-            """)
+    if is_java:
+        def _wrapper_script(record: bool) -> str:
+            # AppMap-Java's Gradle plugin records by inserting the
+            # `appmap` task before the test task. omnibank's
+            # build.gradle.kts gates plugin apply on `-Pappmap_enabled=true`,
+            # so the recording invocation is
+            #     ./gradlew -Pappmap_enabled=true appmap <test-task...>
+            # See https://appmap.io/docs/reference/appmap-gradle-plugin.html
+            #
+            # Output location: the plugin's DEFAULT_OUTPUT_DIRECTORY is
+            # "tmp/appmap" (per AppMapPluginExtension.java line 22), but
+            # that's resolved against each subproject's projectDirectory.
+            # In a multi-project build that means each subproject writes
+            # to <subproject>/tmp/appmap/, not the rootDir's tmp/appmap.
+            # The post-step below consolidates them into <rootDir>/tmp/
+            # appmap/junit/ — the canonical location our host-side watcher
+            # monitors. (`! -path './tmp/appmap/*'` excludes the root's
+            # own tmp/appmap to avoid recursion noise.)
+            if record:
+                return _tw.dedent("""\
+                    #!/usr/bin/env bash
+                    set -uo pipefail
+                    if [[ $# -eq 0 ]]; then
+                      echo "usage: $0 <gradle-task>..." >&2
+                      exit 2
+                    fi
+                    CLONE="$(cd "$(dirname "$0")/.." && pwd)"
+                    cd "$CLONE"
+                    ./gradlew -Pappmap_enabled=true appmap "$@"
+                    status=$?
+                    mkdir -p tmp/appmap/junit
+                    find . -path '*/tmp/appmap/*.appmap.json' \\
+                        ! -path './tmp/appmap/*' -print0 2>/dev/null \\
+                        | xargs -0 -I {} cp -p {} tmp/appmap/junit/ 2>/dev/null || true
+                    exit $status
+                    """)
+            return _tw.dedent("""\
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ $# -eq 0 ]]; then
+                  echo "usage: $0 <gradle-task>..." >&2
+                  exit 2
+                fi
+                CLONE="$(cd "$(dirname "$0")/.." && pwd)"
+                cd "$CLONE"
+                exec ./gradlew "$@"
+                """)
+    else:
+        def _wrapper_script(record: bool) -> str:
+            inner = container_setup + "\n"
+            inner += 'exec appmap-python "$@"\n' if record else 'exec "$@"\n'
+            return _tw.dedent(f"""\
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ $# -eq 0 ]]; then
+                  echo "usage: $0 <test-command...>" >&2
+                  exit 2
+                fi
+                CLONE="$(cd "$(dirname "$0")/.." && pwd)"
+                exec podman run --rm \\
+                    -v "$CLONE":{_shlex.quote(mount_path)} \\
+                    -w {_shlex.quote(mount_path)} \\
+                    -e DATABASE_ENGINE=django.db.backends.sqlite3 \\
+                    -e DATABASE_NAME=:memory: \\
+                    -e PYTHONPATH={_shlex.quote(mount_path)}/src \\
+                    {_shlex.quote(image)} \\
+                    bash -lc {_shlex.quote(inner)} _wrap "$@"
+                """)
 
     # Compose the agent prompt for this backend.
     base_prompt = (REPO_ROOT / "prompts" / "synth_base_solver.txt").read_text()
@@ -225,7 +289,7 @@ def main():
         bin_dir = repo_dir / "bin"
         bin_dir.mkdir(exist_ok=True)
         runt = bin_dir / "run-tests.sh"
-        runt.write_text(_wrapper_script('exec "$@"\n'))
+        runt.write_text(_wrapper_script(record=False))
         runt.chmod(0o755)
 
         if args.backend in ("claude-appmap-mcp", "claude-appmap-3step"):
@@ -236,13 +300,24 @@ def main():
                 from utils.claude_appmap_3step_interface import ClaudeAppMap3StepInterface as _AppMapIface
                 backend_prompt = "(3-step backend builds its own prompts per step)"
             iface = _AppMapIface()
-            iface._test_spec = type("S", (), {"instance_image_key": image})()
-            iface._ensure_instance_image = lambda inst: print(
-                f"  using fixture image: {image}", flush=True)
-            if "container_setup" in fx:
-                iface._record_script = lambda _inst: _wrapper_script(
-                    'exec appmap-python "$@"\n')
-                iface._run_tests_script = lambda _inst: _wrapper_script('exec "$@"\n')
+            # _test_spec.instance_image_key is the str the python flow
+            # uses to construct podman commands; for java we set a
+            # marker that's only ever surfaced in log lines.
+            iface._test_spec = type("S", (), {
+                "instance_image_key": image if image else f"host-java ({language})",
+            })()
+            if is_java:
+                iface._ensure_instance_image = lambda inst: print(
+                    "  using host-side gradle (no container)", flush=True)
+            else:
+                iface._ensure_instance_image = lambda inst: print(
+                    f"  using fixture image: {image}", flush=True)
+            # For both python (container_setup present) and java we
+            # override the per-instance scripts to use _wrapper_script,
+            # which produces the right shape for the language.
+            if is_java or "container_setup" in fx:
+                iface._record_script = lambda _inst: _wrapper_script(record=True)
+                iface._run_tests_script = lambda _inst: _wrapper_script(record=False)
             iface._prompt = backend_prompt
             iface.prepare_workspace(repo_dir, instance)
         else:
@@ -286,9 +361,8 @@ def main():
             iface._ensure_instance_image = lambda inst: print(
                 f"  using fixture image: {image}", flush=True)
             if "container_setup" in fx:
-                iface._record_script = lambda _inst: _wrapper_script(
-                    'exec appmap-python "$@"\n')
-                iface._run_tests_script = lambda _inst: _wrapper_script('exec "$@"\n')
+                iface._record_script = lambda _inst: _wrapper_script(record=True)
+                iface._run_tests_script = lambda _inst: _wrapper_script(record=False)
             iface._prompt = backend_prompt
             result = iface.execute_code_cli(
                 prompt="", cwd=str(repo_dir), model=resolved_model, instance=instance)
@@ -297,7 +371,7 @@ def main():
             bin_dir = repo_dir / "bin"
             bin_dir.mkdir(exist_ok=True)
             runt = bin_dir / "run-tests.sh"
-            runt.write_text(_wrapper_script('exec "$@"\n'))
+            runt.write_text(_wrapper_script(record=False))
             runt.chmod(0o755)
             (repo_dir / "issue.md").write_text(issue_md)
             subprocess.run(["git", "add", "bin/run-tests.sh", "issue.md"],
@@ -377,25 +451,36 @@ def main():
             shutil.copy2(src_path, dst_path)
             print(f"\n--- copied hidden verify test → {dst_path} ---")
     print(f"--- verifying with: {test_cmd} ---")
-    mount_path = fx.get("container_mount", "/testbed")
-    setup_script = fx.get("container_setup",
-                           "source /opt/miniconda3/bin/activate testbed\n"
-                           "pip install -q -e . >/dev/null 2>&1\n")
-    verify_cmd = [
-        "podman", "run", "--rm",
-        "-v", f"{repo_dir}:{mount_path}", "-w", mount_path,
-        "-e", "DATABASE_ENGINE=django.db.backends.sqlite3",
-        "-e", "DATABASE_NAME=:memory:",
-        # The image bakes in `pip install -e /tmp/repo` so without an
-        # override Python imports oscar from /tmp/repo (frozen) instead
-        # of /app/src (the agent's edits). Front-load /app/src on
-        # PYTHONPATH so the mounted source wins.
-        "-e", f"PYTHONPATH={mount_path}/src",
-        fx["instance_image"],
-        "bash", "-lc",
-        setup_script + "\n" + test_cmd + " 2>&1 | tail -15"
-    ]
-    proc = subprocess.run(verify_cmd, capture_output=True, text=True)
+    if is_java:
+        # Host-side: invoke the project's gradle wrapper directly from
+        # the agent's repo. The fixture's verify_test_command is a
+        # gradle invocation like `./gradlew :module:test --tests
+        # 'Class.method'`, so we run it from repo_dir as cwd.
+        verify_cmd = ["bash", "-lc", f"{test_cmd} 2>&1 | tail -40"]
+        proc = subprocess.run(
+            verify_cmd, cwd=str(repo_dir),
+            capture_output=True, text=True,
+        )
+    else:
+        mount_path = fx.get("container_mount", "/testbed")
+        setup_script = fx.get("container_setup",
+                               "source /opt/miniconda3/bin/activate testbed\n"
+                               "pip install -q -e . >/dev/null 2>&1\n")
+        verify_cmd = [
+            "podman", "run", "--rm",
+            "-v", f"{repo_dir}:{mount_path}", "-w", mount_path,
+            "-e", "DATABASE_ENGINE=django.db.backends.sqlite3",
+            "-e", "DATABASE_NAME=:memory:",
+            # The image bakes in `pip install -e /tmp/repo` so without an
+            # override Python imports oscar from /tmp/repo (frozen) instead
+            # of /app/src (the agent's edits). Front-load /app/src on
+            # PYTHONPATH so the mounted source wins.
+            "-e", f"PYTHONPATH={mount_path}/src",
+            fx["instance_image"],
+            "bash", "-lc",
+            setup_script + "\n" + test_cmd + " 2>&1 | tail -15"
+        ]
+        proc = subprocess.run(verify_cmd, capture_output=True, text=True)
     test_output = proc.stdout
     print(test_output)
 
