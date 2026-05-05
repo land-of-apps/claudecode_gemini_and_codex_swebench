@@ -58,21 +58,44 @@ The caller will give you:
 ## Sequence (do these in order)
 
 1. **`find_recordings` first.** Always. If something matches the bug
-   keywords, you have a recording — skip step 2.
-2. **If no recording: reproduce once.** Write the smallest reproducer
+   keywords, you have a recording — skip steps 2–3.
+2. **Reset `appmap.yml` to a minimal config before recording.**
+   Detect the project language from build files (`pyproject.toml` /
+   `setup.py` → python; `build.gradle*` / `pom.xml` → java) and write:
+
+   ```yaml
+   name: <project-name>
+   language: <python|java>
+   appmap_dir: tmp/appmap
+   packages: []
+   ```
+
+   Create the file if it's missing. **If the file exists with a
+   non-empty `packages:` list, overwrite it.** Empty `packages:` is
+   intentional — every investigation starts with built-in
+   instrumentation (HTTP requests, SQL, exceptions, and labeled
+   functions for Python; JDBC, exceptions, labels for Java) and
+   expands only if a recording proves too sparse to localize the bug
+   (see step 6). Inheriting whatever scope a previous developer
+   configured floods the recording with unrelated calls and slows
+   every MCP query.
+3. **If no recording: reproduce once.** Write the smallest reproducer
    that triggers the failure (a pytest test or a `manage.py shell`
    script). Run it under `bin/record-appmap.sh`. One focused
    recording beats ten broad ones.
-3. **Query narrowly.** `find_calls` to locate the function on the
+4. **Query narrowly.** `find_calls` to locate the function on the
    failing path. `get_call_tree` for structure; default depth
    `parent=1, child=1`. If you get an "exceeds maximum" error,
    narrow the focus or reduce depth — never dump-and-read.
-4. **Now you may Read source.** And only now. Read the lines that
+5. **Now you may Read source.** And only now. Read the lines that
    MCP results pointed at. You're confirming a hypothesis the
    recording surfaced, not building one from grep.
-5. **Add labels only if built-ins don't suffice.** Tag 2–4 candidate
-   functions with a transient `bug.<id>` label, re-record, query,
-   then **remove the labels before returning**.
+6. **Expand scope only if built-ins don't suffice.** Two levers, in
+   this order: (a) add ONE package to `appmap.yml` (the package the
+   evidence points into); (b) tag 2–4 candidate functions with a
+   transient `bug.<id>` label. Re-record, re-query. **Remove
+   transient labels and revert any speculative `packages:` additions
+   that didn't pay off before returning.**
 
 ## Hard caps on exploration
 
