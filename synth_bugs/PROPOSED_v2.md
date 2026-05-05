@@ -109,54 +109,136 @@ save, access `full_slug` again, assert it reflects the new slug.
 
 ---
 
-## 3. `oscar_dashboard_view_signal_skipped_on_redirect` *[deferred]*
+## ~~3. `oscar_dashboard_view_signal_skipped_on_redirect`~~ — withdrawn
 
-**user-POV `issue.md` sketch**
+Initial draft mentioned in issue.md *"the missing orders correlate
+with payment paths that go through 3DS or PayPal redirect. Direct-
+card-payment orders are tracked correctly."* That's the same shape
+of comparative cue ("X works but Y doesn't") that gave vanilla
+basket_lock for free. The bug would be solvable by grep on
+`view_signal` once the prose is read. Wouldn't separate the
+backends — drop.
 
-> We have an analytics receiver attached to oscar's view_signal that
-> tracks "thank you page reached" events for funnel analysis. About
-> 12% of orders are missing from the funnel — we know they happened
-> (the order is in the DB, the customer got the email) but the
-> "thank you reached" event never fires.
->
-> Looking at logs, the missing orders correlate with payment paths
-> that go through 3DS or PayPal redirect. Direct-card-payment orders
-> are tracked correctly.
+## ~~4. `oscar_form_clean_method_polymorphism_drift`~~ — withdrawn
 
-**where the bug** — `OrderPlacementMixin.handle_successful_order`
-sends `view_signal` after a successful order is placed. But
-redirect-required payment paths return early from `submit()` with an
-HTTP redirect, never reaching `handle_successful_order`. The
-post-redirect return path doesn't fire view_signal.
-
-**why deferred** — the bug is plausible but I'd need to introduce a
-view_signal-aware analytics receiver to make the test work, plus a
-mock 3DS redirect path. Plantable but more setup than the first two.
+Issue.md had to name "subclass of the basket voucher form" as part
+of the symptom (otherwise the bug doesn't manifest). That's a
+direct layer cue; vanilla resolves it via grep on `BasketVoucherForm`
+plus reading the surrounding methods. Plus the test infrastructure
+has to ship a hypothetical project-side subclass, which doubles as
+an editable target for the agent. Drop.
 
 ---
 
-## 4. `oscar_form_clean_method_polymorphism_drift` *[deferred]*
+After running basket_lock (where I was wrong about its difficulty)
+and cache_stale (where I was right), here's what actually predicts
+3-step's win on a fixture:
+
+  - The issue.md prose suggests a *concept* but no *layer*
+    (e.g., "URLs go stale, restart fixes" → caching, but
+    which cache?).
+  - Multiple plausible code paths could produce the symptom.
+  - The bug location is buried where domain vocabulary doesn't
+    point (e.g., `Category.save()` for a "URL is wrong" bug).
+
+Replacing #3 and #4 with two candidates that fit that pattern.
+
+---
+
+## 3. `oscar_email_total_mismatch` *[selected for build]*
 
 **user-POV `issue.md` sketch**
 
-> We have a project-level subclass of the basket voucher form that
-> adds an extra validation: voucher codes must not contain spaces
-> (we generate ours with no spaces and we don't want users to paste
-> in malformed codes). The validation worked fine for years.
->
-> After upgrading oscar a few weeks back, the validation silently
-> stopped firing. Codes with spaces are accepted again. Our
-> subclass is unchanged, but our validation method is no longer
-> being called from anywhere.
+> Customer service is fielding complaints that the total on the
+> order confirmation email doesn't match the total shown on the
+> order detail page when customers log back in. We've been able
+> to reproduce: place an order with multiple line items and any
+> percentage discount applied, the email shows one number, the
+> account page shows a different one. The difference isn't a
+> rounding penny — it's larger, more like the size of the tax
+> portion. The basket page shows the same total as the order
+> detail page (correct). Just the email is wrong. We've checked
+> the database; the order's total fields are populated correctly.
+> So we don't think it's a save-time issue.
 
-**where the bug** — base class's `clean_code` was renamed (or its
-signature changed); the subclass's override now has a different name
-relative to the new base, so it's not called by the form-cleaning
-machinery. Plantable as a renamed method on the base.
+**where the bug** — `OrderDispatcher.send_order_placed_email_for_user`
+(or whatever the email-rendering hook is in our oscar version)
+constructs the template context. The bug: `extra_context['total']`
+is set to `order.total_excl_tax` instead of `order.total_incl_tax`.
+The order detail page renders `order.total_incl_tax` directly. Same
+data; different representation.
 
-**why deferred** — requires inventing a project-side subclass to
-test against, plus the test setup is complex. Would be a great
-fixture but more work than the first two.
+**why interesting** —
+
+  - **Prose names "total mismatch", "email" and "order detail page".**
+    No code identifier, no method name, no template name. Vanilla's
+    natural first move is to look at the email template — but the
+    template is correct (it just renders whatever `total` is passed).
+  - **Plausibly-wrong locations:** email template, OrderDispatcher,
+    the email-template signal handler, the model's `total` property.
+    Actual location: a single misnamed attribute access in the
+    extra_context dict.
+  - **AppMap value:** the recording captures the actual VALUES being
+    passed to the template render. `find_calls --method
+    send_order_placed_email_for_user` shows the kwargs at a glance;
+    `total_excl_tax` vs `total_incl_tax` is visible. Without runtime
+    data, the agent has to read every layer of the email path.
+  - **Tractable:** 1-line fix.
+
+**verify** — render the email for an order with a discount + tax,
+parse the rendered total out of the email body, assert it equals
+`order.total_incl_tax`.
+
+---
+
+## 4. `oscar_dashboard_count_vs_pagination_drift` *[selected for build]*
+
+**user-POV `issue.md` sketch**
+
+> The dashboard order list says "234 orders" in the page heading,
+> but if you click through to the last page, you only get to about
+> 211 actual orders. The discrepancy isn't pagination math — page
+> sizes are right, the page numbers count up correctly. Some orders
+> are simply missing from the rendered list while still counted in
+> the heading. We've ruled out filters: no date filter, no status
+> filter, no search query, just a plain list of all orders. The
+> count says 234, the rows show 211. Different staff users see
+> different gap sizes.
+
+**where the bug** — the count uses one queryset (or counts via
+`.aggregate(...)` or `.count()`) and the iterating list uses a
+slightly-different queryset. Plantable in a few places:
+
+  - `get_queryset()` returns one queryset, but `get_context_data()`
+    counts a different one.
+  - The list applies `.distinct()` to drop duplicates from a join
+    but the count doesn't.
+  - The list applies a `select_related()` that side-effects
+    filtering somehow.
+
+I'll pick the `distinct()` divergence as the cleanest plant: the
+count goes through `.count()` on the base queryset; the list goes
+through `.distinct().count()` (or vice-versa). With a `lines__partner`
+filter that creates duplicate rows per partner, the two counts
+disagree.
+
+**why interesting** —
+
+  - **Pure behavioral symptom.** No layer name, no identifier, no
+    diagnostic implication beyond "numbers disagree."
+  - **Plausibly-wrong locations:** the count, the list view, the
+    paginator, the queryset, the partner filter.
+  - **AppMap value:** SQL recording shows the TWO different SELECT
+    queries — one with DISTINCT, one without — issued for the same
+    page render. Immediately obvious from `find_queries`. Without
+    runtime data, agent has to reason through Django queryset
+    semantics.
+  - **Tractable:** 1-2 line fix once the divergence is identified.
+
+**verify** — generate a small set of orders with multi-partner
+lines (which trigger the duplicate rows on the join), call the
+view's get_queryset twice — once for count, once for iteration —
+assert they yield the same number of distinct orders.
 
 ---
 

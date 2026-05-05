@@ -1,0 +1,17 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture, designed to test the symptom-to-location-gap hypothesis. Concept-only issue.md (no identifier or layer cues).",
+
+  "clean_upstream": "/Users/kgilpin/tmp/synth_oscar_clean",
+  "bug_patch": "synth_bugs/oscar_dashboard_count_vs_pagination_drift/bug.patch",
+  "verify_patch": "synth_bugs/oscar_dashboard_count_vs_pagination_drift/verify.patch",
+
+  "instance_image": "synth-oscar-test:latest",
+  "container_mount": "/app",
+  "container_setup": "pip install -q -e \".[test]\" >/dev/null 2>&1\n",
+
+  "verify_test_command": "pytest tests/integration/dashboard/test_synth_verify.py -v --tb=short",
+  "fix_files": ["src/oscar/apps/dashboard/orders/views.py"],
+
+  "bug_summary": "OrderListView.get_queryset's voucher-code filter is missing .distinct(); orders with multiple OrderDiscount rows for one voucher (typically Basket + Shipping pair) appear multiple times in the result, inflating paginator total above the actually-distinct rows shown."
+}

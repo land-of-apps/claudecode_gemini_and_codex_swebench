@@ -1,0 +1,11 @@
+--- a/src/oscar/apps/dashboard/orders/views.py
++++ b/src/oscar/apps/dashboard/orders/views.py
+@@ -209,7 +209,7 @@
+ 
+         if data['voucher']:
+             queryset = queryset.filter(
+-                discounts__voucher_code=data['voucher']).distinct()
++                discounts__voucher_code=data['voucher'])
+ 
+         if data['payment_method']:
+             queryset = queryset.filter(

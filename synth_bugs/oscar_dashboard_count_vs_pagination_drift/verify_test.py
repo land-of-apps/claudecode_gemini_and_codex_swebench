@@ -1,0 +1,67 @@
+"""Hidden verification test — never lives in the agent's repo.
+
+Filtering the dashboard order list by voucher code joins the orders
+against `discounts` (each order can have multiple OrderDiscount
+rows for one voucher — typically a Basket + Shipping pair). Without
+.distinct() on that filter, an order with N discount rows for the
+same voucher appears N times in the queryset, inflating the
+paginator's page count vs the unique orders actually shown.
+"""
+
+import pytest
+from django.test import RequestFactory
+
+from oscar.apps.dashboard.orders.views import OrderListView, queryset_orders_for_user
+from oscar.test.factories import (
+    OrderDiscountFactory,
+    OrderFactory,
+    UserFactory,
+)
+
+
+@pytest.mark.django_db
+def test_voucher_filter_returns_one_row_per_order():
+    staff = UserFactory(is_staff=True)
+
+    order_two_discounts = OrderFactory()
+    OrderDiscountFactory(
+        order=order_two_discounts, voucher_code="SPRING24", category="Basket"
+    )
+    OrderDiscountFactory(
+        order=order_two_discounts, voucher_code="SPRING24", category="Shipping"
+    )
+
+    order_one_discount = OrderFactory()
+    OrderDiscountFactory(
+        order=order_one_discount, voucher_code="SPRING24", category="Basket"
+    )
+
+    # Order with no SPRING24 discount; sanity check it doesn't appear.
+    OrderFactory()
+
+    factory = RequestFactory()
+    request = factory.get("/dashboard/orders/?voucher=SPRING24")
+    request.user = staff
+
+    view = OrderListView()
+    view.request = request
+    view.base_queryset = queryset_orders_for_user(staff).order_by("-date_placed")
+    qs = view.get_queryset()
+
+    # Two distinct orders carry the SPRING24 voucher.
+    visible_count = qs.count()
+    distinct_count = qs.distinct().count()
+
+    assert visible_count == 2, (
+        f"Voucher filter returned {visible_count} rows; expected 2 "
+        f"distinct orders matching SPRING24. The order with multiple "
+        f"discount rows for one voucher is being counted multiple times "
+        f"(visible {visible_count}, distinct {distinct_count}). "
+        f"Paginator total will be inflated above the actual orders shown."
+    )
+
+    pks = list(qs.values_list("pk", flat=True))
+    assert len(set(pks)) == len(pks), (
+        f"Queryset returns duplicate order rows: pks={pks}. "
+        f"Paginator total drifts above unique-orders shown."
+    )
