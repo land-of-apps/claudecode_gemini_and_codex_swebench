@@ -1,0 +1,65 @@
+diff --git a/lending-corporate/src/test/java/com/omnibank/lending/corporate/api/AmortizationCalculatorTest.java b/lending-corporate/src/test/java/com/omnibank/lending/corporate/api/AmortizationCalculatorTest.java
+new file mode 100644
+index 0000000..fee784a
+--- /dev/null
++++ b/lending-corporate/src/test/java/com/omnibank/lending/corporate/api/AmortizationCalculatorTest.java
+@@ -0,0 +1,59 @@
++package com.omnibank.lending.corporate.api;
++
++import com.omnibank.shared.domain.CurrencyCode;
++import com.omnibank.shared.domain.DayCountConvention;
++import com.omnibank.shared.domain.Money;
++import com.omnibank.shared.domain.Percent;
++import com.omnibank.shared.domain.Tenor;
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++import java.time.LocalDate;
++import java.util.List;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class AmortizationCalculatorTest {
++
++    @Test
++    void final_installment_zeros_balance_even_under_rounding_drift() {
++        // 5-year, 6% APR, monthly amortizing $100,000 USD term loan —
++        // a textbook case where per-period rounding accumulates to a
++        // non-zero residual unless the final installment absorbs it.
++        LoanTerms terms = new LoanTerms(
++            LoanStructure.TERM_LOAN,
++            Money.of(100_000L, CurrencyCode.USD),
++            Percent.ofPercent(new BigDecimal("6")),
++            DayCountConvention.THIRTY_360,
++            new Tenor(5, Tenor.Unit.YEARS),
++            LocalDate.of(2026, 1, 1),
++            PaymentFrequency.MONTHLY,
++            CurrencyCode.USD
++        );
++        AmortizationSchedule sched = AmortizationCalculator.standardAmortizing(terms);
++        List<AmortizationSchedule.Installment> insts = sched.installments();
++        assertThat(insts).hasSize(60);
++        // Closing balance on the LAST installment must be exactly zero.
++        assertThat(insts.get(insts.size() - 1).closingBalance().isZero()).isTrue();
++    }
++
++    @Test
++    void interest_only_decreases_each_period() {
++        LoanTerms terms = new LoanTerms(
++            LoanStructure.TERM_LOAN,
++            Money.of(50_000L, CurrencyCode.USD),
++            Percent.ofPercent(new BigDecimal("4.5")),
++            DayCountConvention.THIRTY_360,
++            new Tenor(3, Tenor.Unit.YEARS),
++            LocalDate.of(2026, 1, 1),
++            PaymentFrequency.MONTHLY,
++            CurrencyCode.USD
++        );
++        AmortizationSchedule sched = AmortizationCalculator.standardAmortizing(terms);
++        List<AmortizationSchedule.Installment> insts = sched.installments();
++        for (int i = 1; i < insts.size(); i++) {
++            assertThat(insts.get(i).interest().amount())
++                .isLessThanOrEqualTo(insts.get(i - 1).interest().amount());
++        }
++    }
++}

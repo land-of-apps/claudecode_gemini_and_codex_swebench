@@ -1,0 +1,27 @@
+diff --git a/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/AmortizationCalculator.java b/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/AmortizationCalculator.java
+index 0aec5a4..26c2691 100644
+--- a/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/AmortizationCalculator.java
++++ b/lending-corporate/src/main/java/com/omnibank/lending/corporate/api/AmortizationCalculator.java
+@@ -52,19 +52,9 @@ public final class AmortizationCalculator {
+                     terms.currency()
+             );
+ 
+-            Money principalPortion;
+-            Money paymentThis;
+-            Money closing;
+-            if (i == periods) {
+-                // Force balance to zero — dump whatever's left onto the final payment.
+-                principalPortion = balance;
+-                paymentThis = principalPortion.plus(interest);
+-                closing = Money.zero(terms.currency());
+-            } else {
+-                principalPortion = paymentMoney.minus(interest);
+-                closing = balance.minus(principalPortion);
+-                paymentThis = paymentMoney;
+-            }
++            Money principalPortion = paymentMoney.minus(interest);
++            Money closing = balance.minus(principalPortion);
++            Money paymentThis = paymentMoney;
+ 
+             out.add(new AmortizationSchedule.Installment(
+                     i, dueDate, balance, principalPortion, interest, paymentThis, closing
