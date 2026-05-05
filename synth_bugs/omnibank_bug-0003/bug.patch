@@ -1,0 +1,15 @@
+diff --git a/ledger-core/src/main/java/com/omnibank/ledger/internal/PostingServiceImpl.java b/ledger-core/src/main/java/com/omnibank/ledger/internal/PostingServiceImpl.java
+index 95f4d30..9246372 100644
+--- a/ledger-core/src/main/java/com/omnibank/ledger/internal/PostingServiceImpl.java
++++ b/ledger-core/src/main/java/com/omnibank/ledger/internal/PostingServiceImpl.java
+@@ -98,10 +98,6 @@ public class PostingServiceImpl implements PostingService {
+             if (account.isClosed()) {
+                 throw new PostingException(PostingException.Reason.ACCOUNT_CLOSED, l.account().toString());
+             }
+-            if (account.currency() != l.amount().currency()) {
+-                throw new PostingException(PostingException.Reason.MIXED_CURRENCIES,
+-                        "account=" + account.currency() + " line=" + l.amount().currency());
+-            }
+         }
+         // 5. Duplicate business-key guard (idempotency)
+         journals.findByBusinessKey(entry.businessKey()).ifPresent(prior -> {

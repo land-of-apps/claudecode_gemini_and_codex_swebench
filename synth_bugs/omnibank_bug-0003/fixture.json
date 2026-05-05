@@ -1,0 +1,20 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture imported from omnibank's bug/BUG-0003/break branch via tools/import_omnibank_bug.py. language=java, host-side Gradle (no container).",
+  "language": "java",
+  "clean_upstream": "/Users/kgilpin/tmp/omnibank_snapshots/BUG-0003",
+  "bug_patch": "synth_bugs/omnibank_bug-0003/bug.patch",
+  "verify_patch": "synth_bugs/omnibank_bug-0003/verify.patch",
+  "verify_test_command": "./gradlew :ledger-core:test --tests 'PostingServiceImplCurrencyCheckTest.mixed_currency_journal_rejected_before_persistence'",
+  "test_module": "ledger-core",
+  "test_class": "PostingServiceImplCurrencyCheckTest",
+  "test_method": "mixed_currency_journal_rejected_before_persistence",
+  "fix_files": [
+    "ledger-core/src/main/java/com/omnibank/ledger/internal/PostingServiceImpl.java"
+  ],
+  "bug_summary": "BUG-0003: regression \u2014 drop per-line account-vs-amount currency check",
+  "source_branch": "refs/remotes/origin/bug/BUG-0003/break",
+  "source_commit_regression": "4eca3bd7af7f8f30164c10f44804cc48b1aaa96a",
+  "source_commit_test_add": "ebd23c9e14eda7fdba7a3bc69e3845de84db2981",
+  "source_commit_base": "3ef7d8b904640efeeea681cfd3376e45af019588"
+}

@@ -1,0 +1,76 @@
+diff --git a/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
+new file mode 100644
+index 0000000..a2ab7cb
+--- /dev/null
++++ b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
+@@ -0,0 +1,70 @@
++package com.omnibank.ledger.internal;
++
++import com.omnibank.ledger.api.AccountType;
++import com.omnibank.ledger.api.GlAccountCode;
++import com.omnibank.ledger.api.JournalEntry;
++import com.omnibank.ledger.api.PostingException;
++import com.omnibank.ledger.api.PostingLine;
++import com.omnibank.shared.domain.CurrencyCode;
++import com.omnibank.shared.domain.Money;
++import com.omnibank.shared.messaging.EventBus;
++import org.junit.jupiter.api.Test;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.LocalDate;
++import java.time.ZoneId;
++import java.util.Optional;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++import static org.mockito.ArgumentMatchers.anyString;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.when;
++
++/**
++ * Hidden test for BUG-0003. Validates that the per-line account-currency
++ * check rejects a journal whose lines reference a GL account in a
++ * different currency than the line amount, BEFORE persistence.
++ */
++class PostingServiceImplCurrencyCheckTest {
++
++    @Test
++    void mixed_currency_journal_rejected_before_persistence() {
++        JournalEntryRepository journals = mock(JournalEntryRepository.class);
++        GlAccountRepository accounts = mock(GlAccountRepository.class);
++        EventBus events = mock(EventBus.class);
++        Clock clock = Clock.fixed(Instant.parse("2026-04-30T12:00:00Z"), ZoneId.of("UTC"));
++
++        // Two lines, both denominated in USD, balanced. The bug is that
++        // one referenced GL account is EUR — the per-line account-vs-line
++        // currency check must catch this before save.
++        GlAccountCode codeA = new GlAccountCode("ASS-1100-001");
++        GlAccountCode codeB = new GlAccountCode("LIA-2100-001");
++        when(accounts.findById(codeA.value()))
++            .thenReturn(Optional.of(new GlAccountEntity(codeA.value(), AccountType.ASSET,
++                CurrencyCode.USD, "USD asset")));
++        when(accounts.findById(codeB.value()))
++            // Wrong currency — same line amount is USD but account is EUR.
++            .thenReturn(Optional.of(new GlAccountEntity(codeB.value(), AccountType.LIABILITY,
++                CurrencyCode.EUR, "EUR liability")));
++        when(journals.findByBusinessKey(anyString())).thenReturn(Optional.empty());
++
++        Money usd100 = Money.of(100L, CurrencyCode.USD);
++        JournalEntry entry = new JournalEntry(
++            UUID.randomUUID(),
++            LocalDate.of(2026, 4, 30),
++            "BIZ-KEY-1",
++            "test",
++            java.util.List.of(
++                PostingLine.debit(codeA, usd100, "dr"),
++                PostingLine.credit(codeB, usd100, "cr")
++            )
++        );
++
++        PostingServiceImpl svc = new PostingServiceImpl(journals, accounts, events, clock);
++        assertThatThrownBy(() -> svc.post(entry))
++            .isInstanceOf(PostingException.class)
++            .hasMessageContaining("MIXED_CURRENCIES");
++    }
++}
