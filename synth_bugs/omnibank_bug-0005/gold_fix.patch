@@ -1,8 +1,8 @@
 diff --git a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
-index bdc8985..cccac5b 100644
+index af04f24..cccac5b 100644
 --- a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
 +++ b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/ConsumerAccountServiceImpl.java
-@@ -110,13 +110,11 @@ public class ConsumerAccountServiceImpl implements ConsumerAccountService {
+@@ -110,12 +110,11 @@ public class ConsumerAccountServiceImpl implements ConsumerAccountService {
      }
  
      private Money activeHoldsTotal(AccountNumber account, com.omnibank.shared.domain.CurrencyCode ccy) {
@@ -11,10 +11,22 @@ index bdc8985..cccac5b 100644
          List<HoldEntity> active = holds.findByAccountNumberAndReleasedAtIsNull(account.raw());
          Money total = Money.zero(ccy);
          for (HoldEntity h : active) {
--            // Bug: LocalDate-level isBefore excludes holds expiring later today.
 -            LocalDate exp = h.expiresAt().atZone(java.time.ZoneOffset.UTC).toLocalDate();
 -            if (today.isBefore(exp)) {
 +            if (h.isActive(now)) {
                  total = total.plus(Money.of(h.amount(), h.currency()));
              }
          }
+diff --git a/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
+index c008024..93dca8c 100644
+--- a/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
++++ b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
+@@ -52,7 +52,7 @@ class BalanceHoldFilterTest {
+ 
+         AccountNumber acct = AccountNumber.of("OB-C-A1B2C3D4");
+         ConsumerAccountEntity entity = new ConsumerAccountEntity(
+-            acct.raw(), UUID.randomUUID(), ConsumerProduct.CHECKING_BASIC,
++            acct.raw(), UUID.randomUUID(), ConsumerProduct.CHECKING,
+             CurrencyCode.USD, LocalDate.of(2024, 1, 1), null);
+         entity.activate();
+ 

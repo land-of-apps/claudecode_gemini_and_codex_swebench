@@ -1,6 +1,6 @@
 diff --git a/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
 new file mode 100644
-index 0000000..93dca8c
+index 0000000..c008024
 --- /dev/null
 +++ b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/BalanceHoldFilterTest.java
 @@ -0,0 +1,77 @@

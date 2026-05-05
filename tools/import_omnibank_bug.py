@@ -173,6 +173,58 @@ def main() -> None:
             bgk.write_text(bumped)
             print(f"  toolchain bump:    Java 17 → Java 21 in {bgk.name}")
 
+    # ---- compile-gate: verify.patch must compile against the snapshot --
+    # BUG-0005 shipped a hidden test referencing ConsumerProduct.CHECKING
+    # (the enum has CHECKING_BASIC / CHECKING_PREMIUM). The importer
+    # silently produced a fixture whose verify step always fails at
+    # compileTestJava, masking otherwise-correct agent fixes. This gate
+    # applies verify.patch to the snapshot, runs gradle's compileTestJava
+    # on the affected module, and refuses to write the fixture if the
+    # hidden-test source can't be compiled. The patch is reverse-applied
+    # before continuing so the snapshot is back to base + toolchain bump.
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as tf:
+        tf.write(verify_patch)
+        verify_patch_tmp = Path(tf.name)
+    try:
+        apply_proc = subprocess.run(
+            ["patch", "-p1", "-i", str(verify_patch_tmp)],
+            cwd=str(snapshot_dir), capture_output=True, text=True,
+        )
+        if apply_proc.returncode != 0:
+            sys.exit(
+                f"compile-gate: verify.patch failed to apply to snapshot — "
+                f"the patch and the base tree are inconsistent.\n"
+                f"stdout: {apply_proc.stdout}\nstderr: {apply_proc.stderr}"
+            )
+        print(f"  compile-gate:      :{test_module}:compileTestJava ...", end="",
+              flush=True)
+        compile_proc = subprocess.run(
+            ["./gradlew", "--no-configuration-cache",
+             f":{test_module}:compileTestJava"],
+            cwd=str(snapshot_dir), capture_output=True, text=True,
+            timeout=600,
+        )
+        # Always reverse-apply so the snapshot is back to base.
+        subprocess.run(
+            ["patch", "-R", "-p1", "-i", str(verify_patch_tmp)],
+            cwd=str(snapshot_dir), capture_output=True, text=True,
+        )
+        if compile_proc.returncode != 0:
+            print(" FAILED")
+            tail = (compile_proc.stdout + "\n" + compile_proc.stderr).splitlines()
+            for line in tail[-30:]:
+                print(f"    {line}")
+            sys.exit(
+                f"compile-gate: verify.patch source does NOT compile against "
+                f"the snapshot. Refusing to write fixture. Fix the hidden "
+                f"test upstream (or in synth_bugs/{bug_id.lower()}/verify.patch "
+                f"if you've already imported and just need to patch)."
+            )
+        print(" OK")
+    finally:
+        verify_patch_tmp.unlink(missing_ok=True)
+
     # ---- write the fixture ---------------------------------------------
     fixture_dir = REPO_ROOT / "synth_bugs" / f"omnibank_{bug_id.lower()}"
     if fixture_dir.exists():

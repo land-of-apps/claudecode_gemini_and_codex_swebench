@@ -14,7 +14,7 @@
   ],
   "bug_summary": "BUG-0005: regression \u2014 activeHoldsTotal LocalDate-level filter excludes same-day expiries",
   "source_branch": "refs/remotes/origin/bug/BUG-0005/break",
-  "source_commit_regression": "e8f3ca5687a2d9f8769c9e458290163e453d7cae",
-  "source_commit_test_add": "fc9972aa0575efcfa0d0b6023c692a7a7fa5b5e9",
+  "source_commit_regression": "ebdd7ccaabfcd5f60e79340f528eafb70530c1d9",
+  "source_commit_test_add": "5ab39cdacee0e5354cc67d264d91e3b35c5797f5",
   "source_commit_base": "ebd23c9e14eda7fdba7a3bc69e3845de84db2981"
 }
