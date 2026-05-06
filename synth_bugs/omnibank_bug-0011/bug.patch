@@ -1,0 +1,13 @@
+diff --git a/shared-domain/src/main/java/com/omnibank/shared/domain/Percent.java b/shared-domain/src/main/java/com/omnibank/shared/domain/Percent.java
+index e323531..238cd8b 100644
+--- a/shared-domain/src/main/java/com/omnibank/shared/domain/Percent.java
++++ b/shared-domain/src/main/java/com/omnibank/shared/domain/Percent.java
+@@ -41,7 +41,7 @@ public record Percent(BigDecimal basisPoints) implements Comparable<Percent> {
+     }
+ 
+     public Money of(Money amount) {
+-        BigDecimal fraction = basisPoints.divide(BP_PER_UNIT, 10, RoundingMode.HALF_EVEN);
++        BigDecimal fraction = basisPoints.divide(BP_PER_UNIT, 2, RoundingMode.HALF_EVEN);
+         return amount.times(fraction);
+     }
+ 

@@ -1,0 +1,40 @@
+diff --git a/shared-domain/src/test/java/com/omnibank/shared/domain/PercentTest.java b/shared-domain/src/test/java/com/omnibank/shared/domain/PercentTest.java
+new file mode 100644
+index 0000000..8f2b968
+--- /dev/null
++++ b/shared-domain/src/test/java/com/omnibank/shared/domain/PercentTest.java
+@@ -0,0 +1,34 @@
++package com.omnibank.shared.domain;
++
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class PercentTest {
++
++    @Test
++    void applying_percent_preserves_currency_scale() {
++        Percent five_pct = Percent.ofPercent(new BigDecimal("5"));
++        Money usd_100 = Money.of(100L, CurrencyCode.USD);
++        Money result = five_pct.of(usd_100);
++        // USD has 2 minor units; final scale must be exactly 2.
++        assertThat(result.amount().scale()).isEqualTo(2);
++        assertThat(result.amount()).isEqualByComparingTo("5.00");
++    }
++
++    /**
++     * Pinpoints the regression specified in BUG-0011: if Percent.of()
++     * collapses the fraction's working precision before Money.times,
++     * a small percentage applied to a large balance rounds to zero.
++     * 0.001% of $1,000,000 = $10.00 — must survive the conversion.
++     */
++    @Test
++    void applying_very_small_percent_to_large_balance_does_not_round_to_zero() {
++        Percent tiny = Percent.ofRate(new BigDecimal("0.00001")); // 0.001%
++        Money large = Money.of(1_000_000L, CurrencyCode.USD);
++        Money result = tiny.of(large);
++        assertThat(result.amount()).isEqualByComparingTo("10.00");
++    }
++}
