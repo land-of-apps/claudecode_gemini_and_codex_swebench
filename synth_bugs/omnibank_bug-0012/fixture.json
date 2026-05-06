@@ -1,0 +1,20 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture imported from omnibank's bug/BUG-0012/break branch via tools/import_omnibank_bug.py. language=java, host-side Gradle (no container).",
+  "language": "java",
+  "clean_upstream": "/Users/kgilpin/tmp/omnibank_snapshots/BUG-0012",
+  "bug_patch": "synth_bugs/omnibank_bug-0012/bug.patch",
+  "verify_patch": "synth_bugs/omnibank_bug-0012/verify.patch",
+  "verify_test_command": "./gradlew :accounts-consumer:test --tests 'HoldEntityTest.hold_is_active_at_exact_expiry_boundary'",
+  "test_module": "accounts-consumer",
+  "test_class": "HoldEntityTest",
+  "test_method": "hold_is_active_at_exact_expiry_boundary",
+  "fix_files": [
+    "accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/HoldEntity.java"
+  ],
+  "bug_summary": "BUG-0012: regression \u2014 Hold.isActive exclusive at expiry boundary",
+  "source_branch": "refs/remotes/origin/bug/BUG-0012/break",
+  "source_commit_regression": "32e5ee68ca04e27b1f9a99066f1758cac049ad53",
+  "source_commit_test_add": "589d94dad845317701d3b3d973e499b5523f60c1",
+  "source_commit_base": "a3d014e93a023113a1c83d593e4d94cee8ab6c77"
+}

@@ -1,0 +1,13 @@
+diff --git a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/HoldEntity.java b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/HoldEntity.java
+index 8643b3b..5c7ebbd 100644
+--- a/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/HoldEntity.java
++++ b/accounts-consumer/src/main/java/com/omnibank/accounts/consumer/internal/HoldEntity.java
+@@ -57,7 +57,7 @@ public class HoldEntity extends AuditableEntity {
+     }
+ 
+     public boolean isActive(Instant now) {
+-        return releasedAt == null && now.isBefore(expiresAt);
++        return releasedAt == null && !now.isAfter(expiresAt);
+     }
+ 
+     public void release(Instant when) {

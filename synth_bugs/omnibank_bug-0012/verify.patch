@@ -1,0 +1,48 @@
+diff --git a/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/HoldEntityTest.java b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/HoldEntityTest.java
+new file mode 100644
+index 0000000..c9b0bb7
+--- /dev/null
++++ b/accounts-consumer/src/test/java/com/omnibank/accounts/consumer/internal/HoldEntityTest.java
+@@ -0,0 +1,42 @@
++package com.omnibank.accounts.consumer.internal;
++
++import com.omnibank.shared.domain.CurrencyCode;
++import org.junit.jupiter.api.Test;
++
++import java.math.BigDecimal;
++import java.time.Instant;
++import java.time.temporal.ChronoUnit;
++import java.util.UUID;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class HoldEntityTest {
++
++    private HoldEntity hold(Instant placed, Instant expires) {
++        return new HoldEntity(
++            UUID.randomUUID(), "ACC-1",
++            BigDecimal.valueOf(50.00), CurrencyCode.USD,
++            "test", placed, expires
++        );
++    }
++
++    @Test
++    void hold_is_active_at_exact_expiry_boundary() {
++        Instant placed = Instant.parse("2026-04-30T12:00:00Z");
++        Instant expires = placed.plus(1, ChronoUnit.HOURS);
++        HoldEntity h = hold(placed, expires);
++        // At exactly expiresAt, the hold is still active (inclusive).
++        assertThat(h.isActive(expires)).isTrue();
++        // One nanosecond past expiry, inactive.
++        assertThat(h.isActive(expires.plusNanos(1))).isFalse();
++    }
++
++    @Test
++    void released_hold_is_never_active() {
++        Instant placed = Instant.parse("2026-04-30T12:00:00Z");
++        Instant expires = placed.plus(1, ChronoUnit.HOURS);
++        HoldEntity h = hold(placed, expires);
++        h.release(placed.plus(30, ChronoUnit.MINUTES));
++        assertThat(h.isActive(placed.plus(31, ChronoUnit.MINUTES))).isFalse();
++    }
++}
