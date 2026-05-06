@@ -1,94 +1,78 @@
-Account journal-history fetch is making one query per row, slowing reconciliation by 50x
+Audit portal painfully slow for big corporate accounts since the release
 
-What we observed
+Operations engineering paged us yesterday afternoon. The audit
+portal — the internal tool reconciliation analysts use to pull a
+corporate account's full transaction history — is taking 5 to 15
+seconds to load any account with more than ~200 entries in the
+requested date range. Smaller accounts still come up fast.
+Larger accounts either time out or are unusable.
+
+We compared response times against the prior release using the
+same accounts and date ranges:
+
+| Account size  | Prior release | Current release |
+|---------------|---------------|-----------------|
+| ~50 entries   | ~30ms         | ~250ms          |
+| ~200 entries  | ~80ms         | ~1.5s           |
+| ~500 entries  | ~200ms        | ~5-6s           |
+| ~1000 entries | ~400ms        | ~12-15s (timeout) |
+
+The growth is roughly linear in the number of entries — twice as
+many entries means roughly twice as long. That's the shape that
+made us suspect this is something doing per-entry work that
+shouldn't be.
+
+The same internal API also feeds reconciliation worksheets, which
+is what the analysts noticed first. The largest dozen corporate
+accounts went from sub-second to 6-15 seconds. Above a few
+seconds the analysts stop waiting and Slack-ping us instead of
+clicking refresh.
+
+Customer-facing endpoints
+=========================
+
+Customer-facing statement endpoints aren't affected — they go
+through a different code path and feel as fast as before.
+Anything internal that walks the journal history is affected.
+
+Database is fine
 ================
 
-Operations engineering paged us yesterday afternoon: the
-account journal-history endpoint, which we use to populate
-reconciliation worksheets and which the audit-portal calls when
-loading a corporate account's transaction history, started
-timing out for any account with more than ~200 journal entries
-in the requested period. Smaller accounts work; larger accounts
-either time out or the page is unusably slow.
+We checked first. Database CPU is normal, no missing indexes, no
+slow-query log entries — each individual query against the data
+is sub-millisecond. The slowness is in the application layer
+issuing too many queries, not in the database executing any one
+of them.
 
-We enabled SQL logging on staging and reproduced. For an account
-with 318 journal entries in the date range, the endpoint issued
-one parent query that returned the journals, then one
-child-query per journal to fetch that journal's posting lines —
-318 follow-up queries, executed serially. Each is fast on its
-own (sub-millisecond), but the round-trip count adds up: a
-month-of-history fetch that used to take ~80ms now takes 4-6
-seconds. We compared a recent staging snapshot against the
-previous release: same data, same account, same date range —
-the previous release issues 1-2 queries total, current release
-issues 1 + N.
-
-This is the "N+1 query" pattern. The journal record loads, then
-its line collection loads lazily on first access, and our
-serializer touches the lines for every journal. So reading the
-list of journals trips one query for the journals + one
-per-journal query for that journal's lines.
-
-This isn't a database problem (indexes are fine, the engine is
-fast). It's the JPQL we're issuing. The query that returns the
-journals isn't fetching the line collection along with the
-parent rows in the same statement. Pre-regression it did; post-
-regression it doesn't.
-
-Steps to reproduce
-==================
-
-1. In a controlled environment, seed an account with ~50
-   journal entries, each with 2-4 posting lines.
-2. Call the query that returns journals for that account over
-   a date range covering all of them.
-3. Iterate the result list and access `lines` on each returned
-   journal (which is what our serialization layer does).
-4. Watch SQL.
-
-Expected: 1 query. Maybe 2 if the engine splits the join across
-two roundtrips for some reason — but bounded by the structure
-of the query, NOT by the number of journals.
-
-Observed: 1 + N queries (one per journal in the result set).
+The shape of "how many queries get issued" looks like it scales
+with the number of entries. For an account with 318 entries in
+the date range, we counted hundreds of queries against the lines
+table during a single audit-portal page load.
 
 What we expect
 ==============
 
-The journal-history query must materialize each journal's
-posting lines in the same SQL roundtrip as the parent journal
-rows. JPA expresses this as a fetch join — i.e. instead of
-plain `JOIN j.lines l`, write `JOIN FETCH j.lines l`. Without
-the fetch keyword, the join filters but doesn't eagerly populate
-the collection on the parent side, so Hibernate falls back to
-its lazy loader for each parent on access.
+Loading an account's history for a date range should issue a
+small, bounded number of database queries — independent of how
+many entries are in the result. Two or three SQL statements per
+page load, regardless of whether the page is showing 10 entries
+or 1000.
 
-Whatever was generating the JOIN clause for that endpoint's
-query lost the FETCH keyword in the last release. We need it
-back.
+The previous release behaved this way. Something in the most
+recent release broke it.
 
-What actually happens
-=====================
+What we want
+============
 
-The query plan has a JOIN that filters by the right account and
-date range and returns the right journal rows, but the parent
-rows arrive without their line collections initialized. On
-serialization (or any access to the lines property), Hibernate
-issues a one-off SELECT against journal_line for each parent.
-N parents → N child queries.
+Find what changed in the journal-history retrieval that caused
+queries to scale per-entry. Restore the bounded behavior.
+Confirm with a re-run on the same staging snapshot that we're
+back to a small constant number of queries.
 
 Impact
 ======
 
-Performance regression severe enough that the audit-portal team
-is asking us to roll back the release. Reconciliation worksheets
-that pull journal history for the largest dozen corporate
-accounts went from sub-second to 6-15 seconds, which is the
-practical threshold above which the analyst Slack-pings
-engineering instead of clicking refresh. Customer-facing
-statement APIs aren't affected (different code path) but any
-internal tool that walks journal history is.
-
-The fix is in the JPQL of the journal-history query: the join to
-the lines collection needs to be a *fetch* join. Restore the
-FETCH keyword that the last release dropped.
+Audit portal team is asking us to roll back the release if we
+can't get this fixed today. Reconciliation analysts can't do
+their morning workflow on the largest accounts. No
+customer-visible impact, but blocking internal users.

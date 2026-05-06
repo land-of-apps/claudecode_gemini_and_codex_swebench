@@ -1,74 +1,79 @@
-Active corporate loans appearing on the books with no funding event recorded
+Three corporate loans showing as live without any money moving
 
-What we observed
-================
+Treasury reconciliation flagged three large corporate loans this
+week that look funded on our side but no cash has actually moved
+out of our funding account. They're showing in performance
+dashboards, accruing interest, and listed as drawing facilities,
+but the borrower hasn't received anything and we have no
+disbursement entry in the ledger for any of them.
 
-Treasury reconciliation flagged three corporate loans this week
-where the loan record is in the live/active state but there's no
-corresponding disbursement entry in the ledger. Normally we'd see
-a disbursement journal posted when the loan is funded — that's
-the entry that moves cash from our funding account onto the
-borrower's. For these three, the cash never moved on our side,
-yet the loan is being treated as live (accruing interest, showing
-up in performance reports, due-diligence ready).
+How we found it
+===============
 
-The borrowers haven't drawn yet either, which is part of why this
-came to light: a corporate-banking RM was confirming the funding
-date with one of them and was told "no, we never received the
-funds." Pulling the audit trail for that loan, the status moved
-from "approved" straight to "live" with no funding step in
-between. We assumed the disbursement step was missed manually —
-but two more loans showed the same pattern under different RMs,
-so this is systemic.
+A relationship manager called one of the borrowers to confirm
+their funding date. The borrower said "we never received the
+funds." The RM checked our system — the loan was marked as live.
+She escalated. Two more loans turned up over the next two days
+under different RMs with the exact same shape: live on our side,
+no cash on the borrower's side, no disbursement journal posted.
 
-Loans that DID get funded look correct: a funding event sits
-between approval and going-live, with the disbursement journal
-attached, the timing right, and downstream events firing as
-expected. The bad set are unanimously skipping that step.
+Total exposure on the books: ~$4M notional. Nobody has drawn yet,
+so no real money is at risk today, but our reports are wrong and
+the next quarterly audit is in five weeks.
 
-Steps to reproduce
-==================
+Loans that DID get funded look right
+====================================
 
-1. In a controlled environment, take a loan that's been approved
-   (status = approved) but not yet funded.
-2. Drive the workflow that flips a loan to its live/active state.
-3. Observe whether that workflow accepts the transition straight
-   from approved without requiring funded as an intermediate.
+We pulled audit trails for a dozen recent loans that were funded
+normally. Every one of them shows the funding event recorded
+between approval and going-live, the disbursement entry posted
+to the ledger at the same time, and the rest of the downstream
+flow firing in order.
 
-We expected the system to refuse: a loan should only become live
-AFTER it's been funded, never before. Funding is a hard
-prerequisite for a loan being able to accrue interest, take
-payments, etc. — without it the loan shouldn't be visible in any
-operational queue as if it's a real, drawing facility.
+The three problem loans don't have that funding event in their
+audit trail at all. They look like they jumped from the approved
+state directly to the live state, with no funding step in
+between.
+
+We've ruled out
+===============
+
+- Manual override / RM error. We can't find any path through the
+  UI or the RM-facing tools that lets someone bypass the funding
+  step. RMs we've asked say they did the normal flow.
+- Data fix-ups by ops. Audit log doesn't show any manual edits
+  to the loan records.
+- Migration / batch job. The three loans were created at three
+  separate times by three different RMs, all within the past
+  week. No common batch.
 
 What we expect
 ==============
 
-Approved → live should be a *blocked* transition. The only path
-into the live state should be from funded. If a caller asks the
-system to flip a loan straight from approved to live, the system
-should refuse and surface the funding requirement.
+A loan should not be possible to make live until it's been
+funded. The funding step is a hard prerequisite — without cash
+moving on our side, the borrower can't draw and our books are
+fiction. The system should refuse the operation if anyone tries
+to make a loan live without a funding event recorded.
 
-What actually happens
-=====================
+What we want
+============
 
-The system accepts approved → live as a legal transition. There's
-no error, no warning, no audit-log line. The funding gate is
-gone.
+Find the path that's letting these three loans become live without
+funding. Close it. Make sure the operation is rejected — with a
+visible error, not silently — anywhere in the codebase that does
+this kind of state change.
+
+The bigger concern is downstream code that may have ASSUMED a
+loan being live implied funded. If any reporting, accrual,
+statement-generation, or compliance code reads "live" as a proxy
+for "funded", those readings are now wrong for these three loans.
+Worth scanning.
 
 Impact
 ======
 
-Three loans currently in this state, totaling roughly $4M
-notional. None have drawn but all three are showing in our
-performance dashboards as if they're funded. The bigger risk is
-audit and regulatory: corporate loans flowing through the lending
-workflow without a funding entry creates a gap between the
-lending system's view of the borrower and the ledger's, which
-will be flagged at the next quarterly review.
-
-The fix is straightforward in spirit: tighten the legal-transition
-rule so funded is a required step. We need this back to the way
-it used to behave — and verified for any other places downstream
-that may have inferred funding from the live state instead of
-checking explicitly.
+Three loans currently mis-stated, ~$4M notional. Audit risk is
+the bigger exposure than the customer impact (no one's been
+charged or denied service). Quarterly review is in five weeks
+and this is the kind of thing it'll flag.

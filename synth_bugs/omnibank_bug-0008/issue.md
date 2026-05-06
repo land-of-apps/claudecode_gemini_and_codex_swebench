@@ -1,94 +1,76 @@
-Duplicate payment rows on retried submissions — same idempotency key landing twice
+Customers being charged twice on retried payments
 
-What we observed
-================
+Six customers this week have written in saying they got billed
+twice for the same payment. Looking at our records, they're
+right — there are two separate transactions in our system with
+the same memo, the same amount, the same beneficiary, posted
+within a second or two of each other. The customers got two
+confirmation emails too.
 
-Operations flagged six payment-submission incidents in the past
-ten days where a single client request produced two different
-payment IDs in our system, both tied to the same idempotency
-key. The pattern is consistent: the client retries an in-flight
-submit (network hiccup, app refresh, double-click on the "send"
-button) and instead of getting back the same payment ID, gets
-back a different one. By the time we look at the database,
-either there are two rows with the same idempotency key (when
-the second insert managed to land before our unique-index
-caught up), or the second submit returns an unhandled error
-back to the client even though the first submission landed
-fine.
+Our retry contract is supposed to prevent exactly this. When a
+customer's app times out or they hit "send" twice, the second
+attempt is supposed to come back with the same transaction we
+already created — not generate a new one. That's the whole
+reason our payment app sends a unique reference with every
+submission: so we can recognize "oh, we've seen this one, here's
+your existing transaction" instead of creating a duplicate.
 
-Idempotent retry is the contract we publish for our payment
-endpoints — submitting the same request twice with the same key
-is supposed to return the same PaymentId both times, never
-create a second payment, never error. We've been seeing all
-three failure modes:
+Three things we've seen happen
+==============================
 
-- Two PaymentIds returned for the same key (rare, only when the
-  unique index races slowly enough to allow both inserts).
-- One PaymentId returned, then a 500-class error on the retry
-  with a unique-constraint message in our logs (more common).
-- One PaymentId returned, then a different PaymentId returned
-  (worst case for reconciliation — caller can't tell which one
-  is the "real" payment).
+It comes in three flavors:
 
-These all stem from concurrent calls. None of the affected
-incidents involve sequentially-spaced retries (e.g. a client
-waiting 30 seconds and retrying); every one was two requests
-landing within milliseconds of each other.
+1. Customer's statement shows two debits, both posted, both for
+   the same payment. (Worst case — we have to manually reverse
+   one and apologize.)
+2. The customer's app got back a "something went wrong" error on
+   the retry, but their statement shows the original payment
+   went through fine. Confusing for the customer because they
+   don't know if it actually worked.
+3. The customer's app got back two different transaction IDs for
+   what was supposed to be the same payment. Reconciliation
+   nightmare downstream because we can't tell which one is the
+   "real" one to keep.
 
-Steps to reproduce
-==================
+Pattern
+=======
 
-1. In a controlled environment, mock the payment repository so
-   it enforces a unique constraint on `idempotency_key`
-   (i.e. a second insert with the same key throws).
-2. Construct a single PaymentRequest with a fixed idempotency
-   key and otherwise valid fields.
-3. From two threads, simultaneously call submit() on the same
-   service instance with the same request. Use a CountDownLatch
-   or similar to release both threads at once.
-4. Assert: both calls return the same PaymentId, and the
-   repository contains exactly one row for that key.
+Every one of these incidents was a customer hitting "send" twice
+in quick succession (or their app retrying automatically because
+the first response didn't come back fast enough). Talked to one
+of the affected customers — she said the spinner kept going, so
+she tapped the button again. Both her taps got through.
 
-Expected: the two submits serialize. Whichever thread is "first"
-inserts the row; the second thread sees the row already exists
-on its lookup and returns the same PaymentId. No exceptions.
-One row total.
-
-Observed: both threads' lookups race past "no row exists"; both
-proceed to allocate a new PaymentId and call save. The second
-save fails the unique-key constraint OR (in the worst case)
-both saves succeed and we have two rows.
+We don't see this when customers wait and retry slowly. A retry
+30 seconds later always behaves correctly. It only happens when
+the two attempts arrive within milliseconds of each other —
+basically simultaneously.
 
 What we expect
 ==============
 
-Concurrent submit() calls with the same idempotency key MUST
-return the same PaymentId and produce exactly one persisted
-row. Whatever serialization existed in the original
-implementation needs to be back. Caller-side serialization
-isn't a substitute — the contract is that the SERVER protects
-against duplicates, regardless of how the client retries.
+If two payment attempts arrive at the same time with the same
+unique reference, we should process exactly ONE of them and
+return the same transaction ID for both. That's the contract
+our app and our public API both publish. Whatever was protecting
+us from duplicates before broke at some point — we need it back.
 
-What actually happens
-=====================
-
-The lookup-then-save sequence has no mutual exclusion across
-threads. Two concurrent calls both observe "no row" at the
-findByIdempotencyKey step and both attempt to create a new
-payment, leading to one of the failure modes above.
+Caller-side retry caps don't fix this for us. The customer's app
+doesn't know it's racing — it's just retrying because nothing
+came back fast enough. The protection has to live on our side.
 
 Impact
 ======
 
-Six incidents in ten days, four of which surfaced via customer-
-care tickets ("did my payment go through? I got two
-confirmation emails / two SMS / two debits showing pending").
-The exposure scales with submission volume — high-volume
-corporate clients running automated retries are most at risk.
-Reconciliation has to manually pair up the duplicate IDs
-against the bank-side instructions to avoid double-pay events
-downstream.
+Six tickets this week, four of them from corporate customers
+(who run automated retries from their treasury systems and so
+hit this pattern much more often than human users tapping a
+button). Reconciliation team has been manually pairing up the
+duplicate transactions and flagging them for reversal. We've
+had to credit two customers for double-charges that landed in
+their account before we caught them.
 
-The fix is the per-key serialization that used to be there.
-Caller-level retry semantics shouldn't differ from sequential
-retries — same key in, same payment ID out.
+Higher-volume corporate accounts are the bigger risk. Their
+treasury systems are the most likely to retry quickly, and
+they're the customers with the lowest tolerance for "we billed
+you twice, sorry."
