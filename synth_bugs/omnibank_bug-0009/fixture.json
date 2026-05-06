@@ -9,9 +9,7 @@
   "test_module": "ledger-core",
   "test_class": "JournalHistoryQueryTest",
   "test_method": "journal_history_issues_constant_number_of_queries",
-  "fix_files": [
-    "ledger-core/src/main/java/com/omnibank/ledger/internal/JournalEntryRepository.java"
-  ],
+  "fix_files": [],
   "bug_summary": "BUG-0009: regression \u2014 drop JOIN FETCH from findJournalsForAccount (N+1)",
   "source_branch": "refs/remotes/origin/bug/BUG-0009/break",
   "source_commit_regression": "e840c823305973792933081ea0cda9f661b35560",

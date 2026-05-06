@@ -103,19 +103,49 @@ def main() -> None:
         )
 
     # ---- generate the patches ------------------------------------------
-    bug_patch = git("diff",
-                    f"{test_add_sha}..{regression_sha}",
-                    cwd=omnibank)
-    # verify.patch is the test-add commit's diff against base. Most
-    # omnibank bug branches' test-add commits only add a test file, but
-    # some (e.g. BUG-0008) bundle the production fix and the test in
-    # the same commit (then the regression undoes only the production
-    # part). Restrict verify.patch to TEST sources so the agent's
-    # production-code edit isn't silently overwritten by the gold fix
-    # at verify time. `--` followed by pathspecs scopes the diff.
+    #
+    # The patches together describe how to go from `base` (snapshot) to
+    # the bug-reproducing state (regression-applied tree, with the
+    # hidden test waiting in the wings):
+    #
+    #   bug.patch   = diff(base..break)  restricted to NON-test files
+    #   verify.patch = diff(base..break) restricted to TEST files
+    #
+    # This works uniformly across two omnibank bug-branch shapes:
+    #
+    #   "lazy"  test_add adds ONLY the test; regression touches only
+    #           production code.
+    #     diff(base..break) prod = the regression's net change.
+    #     diff(base..break) test = the new test file.
+    #
+    #   "eager" test_add adds the production fix + the test; regression
+    #           undoes only the production fix.
+    #     diff(base..break) prod = (test_add's fix) + (regression's
+    #                              undo) = empty net change.
+    #     diff(base..break) test = the new test file.
+    #
+    # In the eager case, bug.patch is empty: `base` already has the
+    # bug-state code, no patch needed to reach it. Agent runs against
+    # base; finds and fixes the bug; verify.patch then adds the
+    # hidden test on top.
+    #
+    # An earlier version generated bug.patch from
+    # `diff(test_add..regression)`. That worked for lazy bugs but
+    # broke on eager ones: the snapshot is at base (which lacks the
+    # test_add prod fix), and applying the regression diff on it would
+    # try to remove a fix that isn't there — `patch` interprets this
+    # as a reverse-applied diff and silently flips, leaving the
+    # snapshot in the FIXED state and the agent with nothing to fix.
+    bug_patch = git(
+        "diff",
+        f"{base_sha}..{regression_sha}",
+        "--",
+        ":!*/src/test/**", ":!*/src/integrationTest/**",
+        cwd=omnibank,
+    )
     verify_patch = git(
         "diff",
-        f"{base_sha}..{test_add_sha}",
+        f"{base_sha}..{regression_sha}",
         "--",
         "*/src/test/**", "*/src/integrationTest/**",
         cwd=omnibank,
