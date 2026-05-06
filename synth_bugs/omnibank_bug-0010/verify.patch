@@ -1,0 +1,47 @@
+diff --git a/payments-hub/src/test/java/com/omnibank/payments/wire/WireCutoffPolicyTest.java b/payments-hub/src/test/java/com/omnibank/payments/wire/WireCutoffPolicyTest.java
+new file mode 100644
+index 0000000..8b37fa4
+--- /dev/null
++++ b/payments-hub/src/test/java/com/omnibank/payments/wire/WireCutoffPolicyTest.java
+@@ -0,0 +1,41 @@
++package com.omnibank.payments.wire;
++
++import org.junit.jupiter.api.Test;
++
++import java.time.Clock;
++import java.time.Instant;
++import java.time.ZoneId;
++import java.time.ZonedDateTime;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++class WireCutoffPolicyTest {
++
++    private static final ZoneId ET = ZoneId.of("America/New_York");
++
++    @Test
++    void wire_cutoff_closed_on_fed_holiday() {
++        // Juneteenth 2026 falls on Friday June 19. It is a Fed-observed
++        // holiday — Fedwire is CLOSED for customer-initiated wires
++        // even though it's a weekday.
++        Instant juneteenth = ZonedDateTime.of(2026, 6, 19, 11, 0, 0, 0, ET).toInstant();
++        WireCutoffPolicy policy = new WireCutoffPolicy(Clock.fixed(juneteenth, ET));
++        assertThat(policy.isFedwireOpen()).isFalse();
++    }
++
++    @Test
++    void wire_cutoff_open_on_regular_business_morning() {
++        // Tuesday April 14, 2026 at 11 AM ET — normal business day,
++        // before the 5 PM customer cutoff.
++        Instant t = ZonedDateTime.of(2026, 4, 14, 11, 0, 0, 0, ET).toInstant();
++        WireCutoffPolicy policy = new WireCutoffPolicy(Clock.fixed(t, ET));
++        assertThat(policy.isFedwireOpen()).isTrue();
++    }
++
++    @Test
++    void wire_cutoff_closed_after_5pm_on_business_day() {
++        Instant t = ZonedDateTime.of(2026, 4, 14, 17, 30, 0, 0, ET).toInstant();
++        WireCutoffPolicy policy = new WireCutoffPolicy(Clock.fixed(t, ET));
++        assertThat(policy.isFedwireOpen()).isFalse();
++    }
++}

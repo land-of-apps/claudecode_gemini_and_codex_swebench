@@ -1,0 +1,20 @@
+diff --git a/payments-hub/src/main/java/com/omnibank/payments/wire/WireCutoffPolicy.java b/payments-hub/src/main/java/com/omnibank/payments/wire/WireCutoffPolicy.java
+index 547dc44..65c164e 100644
+--- a/payments-hub/src/main/java/com/omnibank/payments/wire/WireCutoffPolicy.java
++++ b/payments-hub/src/main/java/com/omnibank/payments/wire/WireCutoffPolicy.java
+@@ -1,6 +1,5 @@
+ package com.omnibank.payments.wire;
+ 
+-import com.omnibank.shared.domain.BusinessCalendar;
+ import com.omnibank.shared.domain.Timestamp;
+ 
+ import java.time.Clock;
+@@ -32,7 +31,7 @@ public final class WireCutoffPolicy {
+ 
+     public boolean isFedwireOpen(Instant now) {
+         ZonedDateTime et = Timestamp.inBankZone(now);
+-        if (!BusinessCalendar.isBusinessDay(et.toLocalDate())) {
++        if (et.getDayOfWeek() == java.time.DayOfWeek.SATURDAY || et.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+             return false;
+         }
+         return et.toLocalTime().isBefore(CUSTOMER_WIRE_CUTOFF);
