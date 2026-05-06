@@ -1,9 +1,9 @@
 diff --git a/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java b/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java
 new file mode 100644
-index 0000000..a453e2f
+index 0000000..b80b80b
 --- /dev/null
 +++ b/payments-hub/src/test/java/com/omnibank/payments/internal/PaymentIdempotencyTest.java
-@@ -0,0 +1,104 @@
+@@ -0,0 +1,125 @@
 +package com.omnibank.payments.internal;
 +
 +import com.omnibank.payments.ach.AchCutoffPolicy;
@@ -39,6 +39,16 @@ index 0000000..a453e2f
 + * idempotency key MUST return the same PaymentId — the bug is that the
 + * raced findByIdempotencyKey check + save creates two rows + returns
 + * two different ids, violating the at-least-one / at-most-one contract.
++ *
++ * The lookup mock gates on a shared CountDownLatch so the race is
++ * deterministic: with the bug, both threads call findByIdempotencyKey
++ * concurrently (both see "no row"), both proceed to save, and the
++ * second save throws on the unique-key constraint. With a fix that
++ * actually serializes the lookup-then-save sequence, only one thread
++ * is inside findByIdempotencyKey at a time — the other waits on the
++ * synchronization, so the latch times out (500 ms), the first thread's
++ * lookup returns "no row", it saves and exits, the second thread then
++ * enters, finds the row, returns the same PaymentId, and skips save.
 + */
 +class PaymentIdempotencyTest {
 +
@@ -49,9 +59,20 @@ index 0000000..a453e2f
 +        // per key. Mockito wraps it so PaymentServiceImpl interacts with
 +        // the JpaRepository SPI shape it expects.
 +        ConcurrentHashMap<String, PaymentEntity> byKey = new ConcurrentHashMap<>();
++        // Force the race: the lookup mock counts down on entry and
++        // waits for its sibling thread to also enter before returning.
++        // With the bug, both threads serialize HERE, both see "no row",
++        // both then race to save. Without the bug, only one thread is
++        // inside the synchronized block at a time, so the latch times
++        // out (500 ms) — the test still completes.
++        CountDownLatch bothLookedUp = new CountDownLatch(2);
 +        PaymentRepository repo = mock(PaymentRepository.class);
 +        when(repo.findByIdempotencyKey(org.mockito.ArgumentMatchers.anyString()))
-+            .thenAnswer(inv -> Optional.ofNullable(byKey.get(inv.getArgument(0, String.class))));
++            .thenAnswer(inv -> {
++                bothLookedUp.countDown();
++                bothLookedUp.await(500, TimeUnit.MILLISECONDS);
++                return Optional.ofNullable(byKey.get(inv.getArgument(0, String.class)));
++            });
 +        when(repo.save(org.mockito.ArgumentMatchers.any(PaymentEntity.class)))
 +            .thenAnswer(inv -> {
 +                PaymentEntity e = inv.getArgument(0, PaymentEntity.class);
@@ -95,7 +116,7 @@ index 0000000..a453e2f
 +                                catch (Throwable t) { err.compareAndSet(null, t); } });
 +            start.countDown();
 +            pool.shutdown();
-+            assertThat(pool.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
++            assertThat(pool.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
 +        } finally {
 +            pool.shutdownNow();
 +        }

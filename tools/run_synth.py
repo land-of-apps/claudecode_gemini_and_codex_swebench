@@ -76,6 +76,154 @@ def discover_docker_host() -> str | None:
                 return f"unix://{p}"
     except Exception:
         return None
+
+
+def _try_compile_test_java(repo_dir: Path, module: str) -> tuple[bool, str]:
+    """Run `:<module>:compileTestJava` only. Returns (success, output)."""
+    proc = subprocess.run(
+        ["./gradlew", f":{module}:compileTestJava", "--no-daemon"],
+        cwd=str(repo_dir), capture_output=True, text=True, timeout=300,
+    )
+    out = (proc.stdout or "") + (proc.stderr or "")
+    return (proc.returncode == 0, out)
+
+
+_FIXUP_PROMPT = """\
+The TEST below failed to compile after applying the agent's PRODUCTION
+patch. The agent's patch is correct and MUST NOT be modified. Your job
+is to make the MINIMAL test-only edits that get the test to compile
+against the new production API.
+
+# Hard rules
+
+- Edit ONLY files under */src/test/* — never anything else.
+- Do NOT change test assertions, test logic, or the test's intent.
+- Do NOT add new test methods or remove existing ones.
+- Acceptable edits: update a constructor invocation to pass a new
+  parameter the agent's patch added; update an import; add a small
+  helper variable for an extracted dependency; update a method-call
+  signature to match a renamed/re-typed parameter.
+- If the compile errors look semantic rather than mechanical (the
+  agent's patch removed a method the test calls; the agent renamed
+  a class the test imports without an obvious replacement), DO NOT
+  guess. Print:  CANNOT_FIXUP: <one-line why>  and stop.
+
+# Bug report (for context only — do NOT use to "improve" the test)
+
+{issue}
+
+# The agent's PRODUCTION patch (already applied; for reference only)
+
+{patch}
+
+# The test file that won't compile
+
+Path: `{test_path}`
+
+```
+{test_source}
+```
+
+# Compile errors
+
+```
+{errors}
+```
+
+# Output format
+
+Respond with the COMPLETE rewritten test file's contents inside a single
+fenced code block tagged `java`, OR (if you can't fix it minimally)
+with the line `CANNOT_FIXUP: <reason>` and nothing else.
+"""
+
+
+def _fixup_test_for_compile(repo_dir: Path, fx: dict, agent_patch: str,
+                             compile_errors: str, run_dir: Path) -> dict:
+    """One-shot test-only fixup. Calls `claude -p` with a strict prompt,
+    parses the returned file content, writes it back. Records what was
+    sent + what came back under <run_dir>/validation_fixups/.
+
+    Returns {"applied": bool, "reason": str, "fixup_dir": Path}.
+    """
+    fixup_dir = run_dir / "validation_fixups"
+    fixup_dir.mkdir(exist_ok=True)
+    seq = len(list(fixup_dir.glob("attempt_*.json"))) + 1
+
+    # Identify the test file from the verify_test_command (best effort).
+    test_class = fx.get("test_class")
+    test_module = fx.get("test_module")
+    if not test_class or not test_module:
+        return {"applied": False,
+                "reason": "fixture missing test_class or test_module",
+                "fixup_dir": fixup_dir}
+    test_relpath = (Path(test_module) / "src" / "test" / "java" /
+                    Path(*test_class.split(".")[:-1]) /
+                    f"{test_class.split('.')[-1]}.java")
+    test_full = repo_dir / test_relpath
+    if not test_full.is_file():
+        # Fall back: search by class name basename
+        candidates = list(repo_dir.rglob(
+            f"src/test/java/**/{test_class.split('.')[-1]}.java"))
+        if not candidates:
+            return {"applied": False,
+                    "reason": f"could not locate test file for {test_class}",
+                    "fixup_dir": fixup_dir}
+        test_full = candidates[0]
+        test_relpath = test_full.relative_to(repo_dir)
+
+    issue_md = (REPO_ROOT / "synth_bugs" / fx.get("_fixture_id", "?") /
+                "issue.md")
+    issue_text = issue_md.read_text() if issue_md.is_file() else "(missing)"
+
+    prompt = _FIXUP_PROMPT.format(
+        issue=issue_text,
+        patch=agent_patch[:8000],   # cap to keep prompt size sane
+        test_path=str(test_relpath),
+        test_source=test_full.read_text(),
+        errors=compile_errors[-4000:],  # cap; keep the most recent errors
+    )
+
+    sent = fixup_dir / f"attempt_{seq:02d}_prompt.txt"
+    sent.write_text(prompt)
+
+    print(f"  validation fixup attempt {seq}: invoking claude (test-only edit)…",
+          flush=True)
+    proc = subprocess.run(
+        ["claude", "-p", prompt,
+         "--dangerously-skip-permissions",
+         "--model", "claude-sonnet-4-6"],
+        capture_output=True, text=True, timeout=180,
+    )
+    response = proc.stdout or ""
+    (fixup_dir / f"attempt_{seq:02d}_response.txt").write_text(
+        response + "\n--- stderr ---\n" + (proc.stderr or ""))
+
+    if "CANNOT_FIXUP:" in response:
+        reason = response.split("CANNOT_FIXUP:", 1)[1].strip().splitlines()[0]
+        print(f"  fixup declined: {reason}", flush=True)
+        return {"applied": False, "reason": f"declined: {reason}",
+                "fixup_dir": fixup_dir}
+
+    # Pull the rewritten file out of the response. Accept either a fenced
+    # ```java block or a fenced unlabeled block.
+    import re as _re
+    m = _re.search(r"```(?:java)?\n(.*?)\n```", response, _re.DOTALL)
+    if not m:
+        print(f"  fixup response has no fenced code block; abandoning", flush=True)
+        return {"applied": False, "reason": "no fenced code block in response",
+                "fixup_dir": fixup_dir}
+    new_source = m.group(1)
+    if "package " not in new_source[:200]:
+        print(f"  fixup response doesn't look like a java file (no package); abandoning",
+              flush=True)
+        return {"applied": False, "reason": "response not a java file",
+                "fixup_dir": fixup_dir}
+
+    test_full.write_text(new_source)
+    print(f"  fixup applied → {test_relpath}", flush=True)
+    return {"applied": True, "reason": "test rewritten",
+            "fixup_dir": fixup_dir, "edited_file": str(test_relpath)}
     return None
 
 
@@ -515,6 +663,33 @@ def main():
             print(f"\n--- copied hidden verify test → {dst_path} ---")
     print(f"--- verifying with: {test_cmd} ---")
     if is_java:
+        # Compile-fixup loop: try to compile the test first. If it fails,
+        # the agent's patch may have legitimately changed an API the test
+        # touches (constructor signature, method rename, etc.). Allow ONE
+        # one-shot LLM-driven fixup that's strictly limited to test-file
+        # edits — the agent's production patch is not modified. If the
+        # fixup compiles, proceed to the test as normal; if it doesn't,
+        # the test will fail at compile time and the verdict reflects that.
+        fx["_fixture_id"] = args.fixture_id  # for prompt context
+        test_module = fx.get("test_module")
+        if test_module:
+            ok, comp_out = _try_compile_test_java(repo_dir, test_module)
+            if not ok:
+                print(f"--- compileTestJava failed; attempting test-only fixup ---")
+                fixup = _fixup_test_for_compile(
+                    repo_dir, fx, agent_patch=patch,
+                    compile_errors=comp_out, run_dir=run_dir,
+                )
+                (run_dir / "validation_fixups" / "summary.json").write_text(
+                    json.dumps({k: str(v) if isinstance(v, Path) else v
+                                for k, v in fixup.items()}, indent=2))
+                if fixup["applied"]:
+                    ok2, comp_out2 = _try_compile_test_java(repo_dir, test_module)
+                    if ok2:
+                        print("  fixup compile: OK")
+                    else:
+                        print("  fixup compile: STILL FAILS — running test anyway")
+
         # Host-side: invoke the project's gradle wrapper directly from
         # the agent's repo. The fixture's verify_test_command is a
         # gradle invocation like `./gradlew :module:test --tests
