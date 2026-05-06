@@ -234,7 +234,11 @@ def main():
                         "$@"
                     status=$?
                     mkdir -p tmp/appmap/junit
-                    find . -path '*/tmp/appmap/*.appmap.json' \\
+                    # Recordings can land at <module>/tmp/appmap/foo.appmap.json
+                    # (older layout) OR <module>/tmp/appmap/junit/foo.appmap.json
+                    # (current appmap-java layout); -name catches both since the
+                    # `-path '*/tmp/appmap/*'` constraint scopes by dir, not depth.
+                    find . -name '*.appmap.json' -path '*/tmp/appmap/*' \\
                         ! -path './tmp/appmap/*' -print0 2>/dev/null \\
                         | xargs -0 -I {{}} cp -p {{}} tmp/appmap/junit/ 2>/dev/null || true
                     exit $status

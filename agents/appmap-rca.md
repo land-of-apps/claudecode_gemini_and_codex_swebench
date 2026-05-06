@@ -87,12 +87,35 @@ The caller will give you:
    (see step 6). Inheriting whatever scope a previous developer
    configured floods the recording with unrelated calls and slows
    every MCP query.
-3. **Reproduce + record.** Required on the full path. Write the
-   smallest reproducer that triggers the failure (a pytest test or
-   a `manage.py shell` script for Python; a JUnit method or
-   `bin/record-appmap.sh :module:test --tests ...` invocation for
-   Java). One focused recording beats ten broad ones. If
-   `find_recordings` already returned something keyed to the bug
+3. **Reproduce + record — TACTICALLY.** Required on the full path.
+   Record exactly the call path the bug names, and nothing else.
+
+   **Forbidden invocations:**
+   - `bin/record-appmap.sh test` (whole repo) — produces thousands
+     of recordings, drowns the indexer, signals nothing about the
+     bug. Do not run this.
+   - `bin/record-appmap.sh :module:test` without a `--tests` filter
+     (whole module) — same problem, smaller blast radius.
+   - `pytest path/to/dir/` (recursive) — same, for python.
+
+   **Required shape:**
+   - **Python:** one specific test or shell script. Examples:
+     `bin/record-appmap.sh pytest tests/test_repro_<id>.py::test_one`
+     or `bin/record-appmap.sh python -c "<10-line repro>"`.
+   - **Java:** one test class, ideally one method. Example:
+     `bin/record-appmap.sh :payments-hub:test --tests com.omnibank.payments.wire.WireCutoffPolicyTest.fed_holiday_returns_closed`.
+   - **HTTP-amenable bugs (preferred when possible):** start the
+     app under recording and drive a single request. The HTTP
+     middleware records each request as a separate, well-named
+     recording — much easier to reason about than method-level
+     recordings.
+
+   **If no test covers the bug path:** write the smallest possible
+   one (a pytest function or a JUnit method). One method, one
+   assertion, one recording. Don't extend an existing test class
+   that has dozens of unrelated methods — those get recorded too.
+
+   If `find_recordings` already returned something keyed to the bug
    keywords, you may use it instead of producing a new one — but
    only if it was made AFTER your appmap.yml reset (otherwise the
    scope is stale).

@@ -1,30 +1,50 @@
-// Pre-attach the AppMap javaagent to all Test tasks unconditionally.
+// Pre-attach the AppMap javaagent to all Test tasks unconditionally,
+// using a locally-built agent JAR when available.
 //
-// The AppMap Gradle plugin's `appmap` task is itself a `Test` subclass
-// whose doLast attaches the javaagent to OTHER Test tasks via
-// LoadAppMapAgentAction. doLast actions are skipped when the task's
-// main body fails — and the appmap task's main body (running tests)
-// fails whenever any test fails. That breaks our use case: bug-fix
-// scenarios where the hidden test fails are exactly the ones we need
-// to record. Without this init script, no recordings would be
-// produced for any failing-test fixture.
+// Two things this script does, in order:
 //
-// This script bypasses the plugin's failure-fragile attachment by
-// attaching the agent in an `afterEvaluate` block that runs whether
-// or not any task fails. It uses runtime class resolution (via
-// `extension.class.classLoader.loadClass(...)`) because gradle init
-// scripts don't have the plugin's classes on their compile-time
-// classpath.
+// 1. Override the plugin's `appmapAgent` Configuration to point at a
+//    local JAR (env var APPMAP_AGENT_JAR or the default path below)
+//    INSTEAD of resolving "com.appland:appmap-agent:<version>" from
+//    Maven Central. Lets us use unreleased fixes from the local
+//    appmap-java checkout (e.g. the @Labels-bypass-trivial-filter fix
+//    in commit 7171e591). No-op if the local JAR doesn't exist.
 //
-// Apply with:  ./gradlew --init-script <this-file> -Pappmap_enabled=true :module:test ...
+// 2. Pre-attach the agent to every Test task in afterEvaluate. The
+//    plugin's own attachment runs in the `appmap` Test task's doLast,
+//    which is SKIPPED whenever any test fails — exactly the case we
+//    care about (bug-reproducing test must fail). Pre-attaching in
+//    afterEvaluate runs unconditionally.
 //
 // Recordings land at <subproject>/tmp/appmap/junit/<class>_<method>.appmap.json
 // per AppMapPluginExtension.DEFAULT_OUTPUT_DIRECTORY ("tmp/appmap")
 // resolved against each subproject's projectDirectory.
 
+def localAgentJarPath = System.getenv("APPMAP_AGENT_JAR") ?:
+    "/Users/kgilpin/source/appland/appmap-java/agent/build/libs/appmap-1.30.0.jar"
+def localAgentJar = new File(localAgentJarPath)
+
 allprojects {
     pluginManager.withPlugin("com.appland.appmap") { plugin ->
+        // (1) Swap the agentConf's contents to the local JAR. Must run
+        //     before AgentCommandLineLoader.getAsJvmArg() resolves the
+        //     SingleFile, but the loader is called lazily at task-graph
+        //     execution — so doing it in afterEvaluate is fine.
         afterEvaluate {
+            if (localAgentJar.isFile()) {
+                def agentConf = configurations.findByName("appmapAgent")
+                if (agentConf != null) {
+                    agentConf.dependencies.clear()
+                    agentConf.dependencies.add(dependencies.create(files(localAgentJar)))
+                    logger.lifecycle("[appmap-init] overrode appmapAgent → ${localAgentJar.absolutePath}")
+                }
+            } else {
+                logger.warn("[appmap-init] local agent JAR not found at " +
+                    "${localAgentJarPath}; falling back to plugin's bundled agent")
+            }
+
+            // (2) Pre-attach to all Test tasks (skip the plugin's own
+            //     `appmap` task to avoid double-attach).
             tasks.withType(org.gradle.api.tasks.testing.Test).configureEach { t ->
                 if (t.class.simpleName == "AppMapTask") {
                     return
