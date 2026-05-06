@@ -14,7 +14,7 @@
   ],
   "bug_summary": "BUG-0003: regression \u2014 drop per-line account-vs-amount currency check",
   "source_branch": "refs/remotes/origin/bug/BUG-0003/break",
-  "source_commit_regression": "4eca3bd7af7f8f30164c10f44804cc48b1aaa96a",
-  "source_commit_test_add": "ebd23c9e14eda7fdba7a3bc69e3845de84db2981",
+  "source_commit_regression": "5b4864b00e259b268b1049527a5cb263ea2c905c",
+  "source_commit_test_add": "a2837308b27d4bbbb88196f6d64f279beeca0295",
   "source_commit_base": "3ef7d8b904640efeeea681cfd3376e45af019588"
 }

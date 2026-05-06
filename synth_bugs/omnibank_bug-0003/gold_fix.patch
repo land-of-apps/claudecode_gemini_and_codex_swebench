@@ -13,3 +13,20 @@ index 9246372..95f4d30 100644
          }
          // 5. Duplicate business-key guard (idempotency)
          journals.findByBusinessKey(entry.businessKey()).ifPresent(prior -> {
+diff --git a/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
+index 6971f22..a2ab7cb 100644
+--- a/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
++++ b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
+@@ -65,11 +65,6 @@ class PostingServiceImplCurrencyCheckTest {
+         PostingServiceImpl svc = new PostingServiceImpl(journals, accounts, events, clock);
+         assertThatThrownBy(() -> svc.post(entry))
+             .isInstanceOf(PostingException.class)
+-            // Substring match accepts either MIXED_CURRENCIES (preserving the
+-            // existing line-set-conflated semantics) or a more specific
+-            // CURRENCY_MISMATCH (introduced by a fixer who disambiguates).
+-            // Both are legitimate fixes; this assertion gates "the user-facing
+-            // exception message conveys 'currency'" without pinning enum names.
+-            .hasMessageContaining("CURRENC");
++            .hasMessageContaining("MIXED_CURRENCIES");
+     }
+ }

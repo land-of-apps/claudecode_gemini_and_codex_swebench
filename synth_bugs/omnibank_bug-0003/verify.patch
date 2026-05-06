@@ -1,9 +1,9 @@
 diff --git a/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
 new file mode 100644
-index 0000000..a2ab7cb
+index 0000000..6971f22
 --- /dev/null
 +++ b/ledger-core/src/test/java/com/omnibank/ledger/internal/PostingServiceImplCurrencyCheckTest.java
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,75 @@
 +package com.omnibank.ledger.internal;
 +
 +import com.omnibank.ledger.api.AccountType;
@@ -71,6 +71,11 @@ index 0000000..a2ab7cb
 +        PostingServiceImpl svc = new PostingServiceImpl(journals, accounts, events, clock);
 +        assertThatThrownBy(() -> svc.post(entry))
 +            .isInstanceOf(PostingException.class)
++            // Substring match accepts either MIXED_CURRENCIES (preserving the
++            // existing line-set-conflated semantics) or a more specific
++            // CURRENCY_MISMATCH (introduced by a fixer who disambiguates).
++            // Both are legitimate fixes; this assertion gates "the user-facing
++            // exception message conveys 'currency'" without pinning enum names.
 +            .hasMessageContaining("CURRENC");
 +    }
 +}
