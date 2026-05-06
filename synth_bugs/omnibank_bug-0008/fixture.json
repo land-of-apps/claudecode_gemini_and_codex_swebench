@@ -9,7 +9,9 @@
   "test_module": "payments-hub",
   "test_class": "PaymentIdempotencyTest",
   "test_method": "concurrent_submit_with_same_idempotency_key_returns_same_payment_id",
-  "fix_files": [],
+  "fix_files": [
+    "payments-hub/src/main/java/com/omnibank/payments/internal/PaymentServiceImpl.java"
+  ],
   "bug_summary": "BUG-0008: regression \u2014 drop per-key synchronized from submit()",
   "source_branch": "refs/remotes/origin/bug/BUG-0008/break",
   "source_commit_regression": "fe52ef53cbdc157e12b1c584ba4e78968932c93f",

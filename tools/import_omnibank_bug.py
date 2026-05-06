@@ -169,9 +169,22 @@ def main() -> None:
                  f"verify_patch was:\n{verify_patch[:500]}")
     print(f"  hidden test:       :{test_module} → {test_class}.{test_method}")
 
-    fix_files = _extract_modified_files(bug_patch, exclude_test_files=True)
+    # `fix_files` lists the production-code paths the agent's patch is
+    # expected to touch. For lazy-style bug branches, bug.patch IS the
+    # regression diff and these match. For eager-style branches
+    # (BUG-0008/0009) bug.patch is empty (snapshot already at bug
+    # state), so we derive fix_files from the regression commit alone —
+    # the prod files the regression touches are what the agent has to
+    # un-touch to fix the bug.
+    regression_diff_for_meta = git(
+        "diff", f"{regression_sha}~1..{regression_sha}",
+        "--", ":!*/src/test/**", ":!*/src/integrationTest/**",
+        cwd=omnibank,
+    )
+    fix_files = _extract_modified_files(regression_diff_for_meta,
+                                        exclude_test_files=True)
     if not fix_files:
-        print("  WARNING: bug.patch modifies no non-test files — review.",
+        print("  WARNING: regression commit modifies no non-test files — review.",
               file=sys.stderr)
     print(f"  fix files:         {fix_files}")
 
