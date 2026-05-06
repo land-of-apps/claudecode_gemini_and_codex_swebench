@@ -1,0 +1,20 @@
+{
+  "_format_version": 2,
+  "_format_notes": "v2 fixture imported from omnibank's bug/BUG-0009/break branch via tools/import_omnibank_bug.py. language=java, host-side Gradle (no container).",
+  "language": "java",
+  "clean_upstream": "/Users/kgilpin/tmp/omnibank_snapshots/BUG-0009",
+  "bug_patch": "synth_bugs/omnibank_bug-0009/bug.patch",
+  "verify_patch": "synth_bugs/omnibank_bug-0009/verify.patch",
+  "verify_test_command": "./gradlew :ledger-core:test --tests 'JournalHistoryQueryTest.journal_history_issues_constant_number_of_queries'",
+  "test_module": "ledger-core",
+  "test_class": "JournalHistoryQueryTest",
+  "test_method": "journal_history_issues_constant_number_of_queries",
+  "fix_files": [
+    "ledger-core/src/main/java/com/omnibank/ledger/internal/JournalEntryRepository.java"
+  ],
+  "bug_summary": "BUG-0009: regression \u2014 drop JOIN FETCH from findJournalsForAccount (N+1)",
+  "source_branch": "refs/remotes/origin/bug/BUG-0009/break",
+  "source_commit_regression": "e840c823305973792933081ea0cda9f661b35560",
+  "source_commit_test_add": "ac7a7495306e7b5b7021061bad9be9e9f6e2714b",
+  "source_commit_base": "2267c2e8d4095c5e62b12f3e336195a0a5a3f4eb"
+}
