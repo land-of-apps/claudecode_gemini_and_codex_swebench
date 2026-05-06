@@ -32,6 +32,14 @@ guessing.
 1. **Re-run the reproducer under recording.** `bin/record-appmap.sh
    <reproducer>`. Only one recording is needed; the question is
    binary.
+
+   **Use `appmap.yml` AS-IS — do NOT modify it.** The RCA subagent
+   left a configuration tuned to the bug's call path; your job is
+   to compare your recording to that one under matching scope. If
+   you change `packages:`, add labels, or otherwise reshape the
+   scope, the comparison is meaningless. Same applies to any
+   transient `bug.<id>` labels in source — leave them alone; RCA
+   put them there for a reason.
 2. **Query the specific change.** Use the verb that fits the claim:
    - `find_calls` — did this function fire? did this method run?
    - `get_call_tree` — does the call structure now match the

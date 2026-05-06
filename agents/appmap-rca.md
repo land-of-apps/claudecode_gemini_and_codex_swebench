@@ -66,27 +66,40 @@ The caller will give you:
 
 1. **`find_recordings` first.** Always. If something matches the bug
    keywords, you have a recording — skip steps 2–3.
-2. **Reset `appmap.yml` to a minimal config.** Always, on the full
-   path — even if `find_recordings` found something. Detect the
-   project language from build files (`pyproject.toml` / `setup.py`
-   → python; `build.gradle*` / `pom.xml` → java) and write:
+2. **Configure `appmap.yml` to capture the project's primary
+   namespace.** Always, on the full path — even if `find_recordings`
+   found something.
+
+   Detect the project namespace from build metadata, NOT from
+   reading source:
+   - Java: the `group =` line in `build.gradle(.kts)` or
+     `<groupId>` in `pom.xml` (e.g. `com.omnibank`).
+   - Python: the `name = ` field in `setup.py` /
+     `pyproject.toml [project]`, or the top-level package
+     directory under `src/` (e.g. `oscar`).
+
+   Write:
 
    ```yaml
    name: <project-name>
    language: <python|java>
    appmap_dir: tmp/appmap
-   packages: []
+   packages:
+     - path: <project-namespace>
    ```
 
-   Create the file if it's missing. **If the file exists with a
-   non-empty `packages:` list, overwrite it.** Empty `packages:` is
-   intentional — every investigation starts with built-in
-   instrumentation (HTTP requests, SQL, exceptions, and labeled
-   functions for Python; JDBC, exceptions, labels for Java) and
-   expands only if a recording proves too sparse to localize the bug
-   (see step 6). Inheriting whatever scope a previous developer
-   configured floods the recording with unrelated calls and slows
-   every MCP query.
+   Create the file if it's missing. **If the file exists with
+   different scope, OVERWRITE it.** The single namespace entry
+   captures everything in the project's own code while excluding
+   frameworks (Spring, Hibernate, Django internals, third-party
+   libraries) — that gives a good overview of program execution
+   without drowning the recording in framework noise.
+
+   Do NOT enumerate sub-packages by hand. The namespace entry
+   captures all of them. Do NOT add utility-only packages here
+   (e.g. shared/util, common, vendor wrappers) unless evidence
+   later points to them — those get added with `shallow: true`
+   in step 6.
 3. **Reproduce + record — TACTICALLY.** Required on the full path.
    Record exactly the call path the bug names, and nothing else.
 
@@ -126,12 +139,22 @@ The caller will give you:
 5. **Now you may Read source.** And only now. Read the lines that
    MCP results pointed at. You're confirming a hypothesis the
    recording surfaced, not building one from grep.
-6. **Expand scope only if built-ins don't suffice.** Two levers, in
-   this order: (a) add ONE package to `appmap.yml` (the package the
-   evidence points into); (b) tag 2–4 candidate functions with a
-   transient `bug.<id>` label. Re-record, re-query. **Remove
-   transient labels and revert any speculative `packages:` additions
-   that didn't pay off before returning.**
+6. **Expand scope only if the recording doesn't show the failing
+   call path.** Two levers, in this order:
+   (a) add ONE more `packages:` entry — for utility/shared/vendor
+       code that the evidence points into, mark it
+       `shallow: true` so its inner control flow is summarized
+       rather than fully traversed;
+   (b) tag 2–4 candidate functions with a transient `bug.<id>`
+       label.
+   Re-record, re-query.
+
+   **LEAVE the final `appmap.yml` IN PLACE before returning.** The
+   `appmap-verify` subagent will re-record the SAME scope to compare
+   runtime behavior before vs after the fix — if you reset
+   `appmap.yml` here, verify gets a different recording shape and
+   can't compare. Same applies to transient labels: leave them;
+   verify needs them too.
 
 ## Hard caps on exploration
 
