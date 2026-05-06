@@ -45,8 +45,18 @@ guessing.
 
 ## What you do NOT do
 
-- **Do not edit any source file** — production or test. You are
-  read-only relative to source. The caller owns all edits.
+- **Do not edit, create, or write any source file** — production
+  or test. You are read-only relative to source. The caller owns
+  all edits. This applies REGARDLESS of mechanism: not via Edit
+  or Write (those tools aren't in your toolset), and **not via
+  Bash heredocs / `cat > file` / `tee` / `sed -i` / `echo >>`
+  either**. Bash is for `bin/record-appmap.sh` and
+  `bin/run-tests.sh` invocations only.
+- **If no covering test exists for the bug path, return
+  INSUFFICIENT COVERAGE rather than write one.** "I had to
+  write a test to drive the recording" is not an acceptable
+  workflow — that test is editorial work the caller should
+  have done in the fix step.
 - **Do not "improve" the fix or suggest alternatives.** Just verify.
   If the fix doesn't work, say so and cite — let the caller decide.
 - **Do not re-investigate the root cause.** That was `appmap-rca`'s
