@@ -20,6 +20,7 @@ backend strategy. Model: `claude-opus-4-7`.
 | BUG-0009 | ✅ pass | ✅ pass (triage) | N+1 query (JOIN FETCH dropped). First "eager-style" branch where the importer's new bug.patch+verify.patch split logic matters: bug.patch is empty (snapshot's base already has the bug), agent runs against base, edits JournalEntryRepository.java to add `join fetch`. 3-step went further — added `select distinct` + `exists` subquery to decouple the WHERE filter from the FETCH (a real Hibernate footgun the gold fix doesn't address). Both pass the structural assertion `jpql.contains("join fetch j.lines")`. |
 | BUG-0010 | ✅ pass | ✅ pass (triage) | Wire cutoff lost Fed-holiday awareness (Saturday/Sunday-only check). Both edited only WireCutoffPolicy.java to restore `BusinessCalendar.isBusinessDay`. RCA pointed at the sibling `AchCutoffPolicy` as the existing pattern to follow. |
 | BUG-0011 | ✅ pass | ✅ pass (triage) | Percent.of pre-rounded the basis-points→fraction conversion to 2 decimal places, destroying sub-percent precision before the multiply. Both edited only Percent.java to restore the higher (10dp) intermediate scale. RCA noted Money.of already rounds to currency minor units at output, so the bug is "exclusively the pre-rounding" in Percent.of. |
+| BUG-0012 | ✅ pass | ✅ pass (triage) | Hold.isActive turned the expiry-instant boundary exclusive (`now.isBefore(expiresAt)`); contract is inclusive. Eager-style branch (empty bug.patch). Both edited only HoldEntity.java to flip back to `!now.isAfter(expiresAt)`. |
 
 ## Recording-pipeline evidence
 
